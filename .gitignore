@@ -2,18 +2,3 @@ deltagen
 deltagen-ras224.o
 tblock
 tblock-ras224.o
-
-# files generated from deltagen
-delta-multip.dat
-delta-tblock.dat
-gridin
-out
-
-# files generated from tblock
-flow-1.vtu
-flow-2.vtu
-flowout
-gridout
-mblock.log
-stopit
-coefficients.csv

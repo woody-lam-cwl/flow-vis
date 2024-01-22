@@ -23,9 +23,9 @@ C
       REAL  MACH
       INTEGER NSTEPS
 C
-       CHARACTER*72  TITLE,ROWTIT,dummy line
+       CHARACTER*72  SIM_NAME,OUTPUT_PATH,TITLE,ROWTIT,dummy line
        CHARACTER*1   ANS,DUMMY,INDI,INDE,INDP,INDF
-       LOGICAL DELTACWD
+       LOGICAL DELTACWD,RESULTS_EXIST
 C 
 C     SET THE INPUT AND OUTPUT UNITS
 C
@@ -37,9 +37,24 @@ C
 C     THE FILE 'stage.dat' IS AN INPUT FILE FOR THE MULTISTAGE 3D PROGRAM
 C 
       INQUIRE( FILE='deltagen.raw', EXIST=DELTACWD)
+      
+      WRITE(6,*) 'Simulation name: '
+      READ(5,*) SIM_NAME
+      
+      OUTPUT_PATH = './results/'//TRIM(SIM_NAME)//'/'
+      
+      INQUIRE(FILE=OUTPUT_PATH, EXIST=RESULTS_EXIST)
+      
+      IF (RESULTS_EXIST) THEN
+      	WRITE(6,*) 'Directory already exist: '//TRIM(OUTPUT_PATH)
+      	CALL EXIT
+      ELSE
+      	CALL system('mkdir -p '//TRIM(OUTPUT_PATH))
+      ENDIF
+      
       IF (DELTACWD) THEN
          WRITE(6,*) 'Using input file: ./deltagen.raw '
-         OPEN( UNIT=7,FILE= 'deltagen.raw') 
+         OPEN( UNIT=7,FILE='deltagen.raw') 
       ELSE
 c        RAS224: Changed location of default input file
          WRITE(6,*) 
@@ -47,8 +62,8 @@ c        RAS224: Changed location of default input file
          OPEN( UNIT=7,FILE= '/usr/local/example_scripts/deltagen.raw') 
       ENDIF         
       WRITE(6,*)
-      OPEN(UNIT=8,FILE=  'out')
-      OPEN(UNIT=4,FILE=  'delta-multip.dat')
+      OPEN(UNIT=8,FILE=TRIM(OUTPUT_PATH) // 'out')
+      OPEN(UNIT=4,FILE=TRIM(OUTPUT_PATH) // 'delta-multip.dat')
 C
       PI=3.1415927
       DEGRAD=PI/180.
@@ -1262,7 +1277,7 @@ C
 C            
 C     WRITE THE GRID COORDINATES TO FILE "gridin"
 C
-      OPEN(UNIT=3,FILE='gridin')
+      OPEN(UNIT=3,FILE=TRIM(OUTPUT_PATH)//'gridin')
 C
       DO 601 NB = 1,2
       DO 600 K=1,KM
@@ -1281,7 +1296,8 @@ C
 C
 C      NOW WRITE OUT THE REST OF A TBLOCK DATA SET TO UNIT 11
 C
-      OPEN(UNIT=11,FILE='delta-tblock.dat')
+      OPEN(UNIT=11,FILE=TRIM(OUTPUT_PATH)//'delta-tblock.dat')
+      WRITE(11,*) TRIM(OUTPUT_PATH)
 C
       DUMMY = 'C'
       INDI  = 'I'
@@ -1513,7 +1529,7 @@ C
       CLOSE(11)
 C 
 C
-C      OPEN(UNIT=11,FILE='gridin')
+C      OPEN(UNIT=11,FILE=OUTPUT_PATH//'gridin')
 C
 
       STOP 

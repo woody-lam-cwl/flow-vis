@@ -5,10 +5,14 @@ C
       INCLUDE 'commall-29'
 C
 C
-      OPEN(UNIT=4, FILE='mblock.log')
-      OPEN(UNIT=7, FILE='coefficients.csv')
-      OPEN(UNIT=11,FILE='stopit')
-      OPEN(UNIT=3, FILE='gridin')
+      READ(5,'(A)') OUTPUT_PATH
+      OUTPUT_PATH = ADJUSTL(OUTPUT_PATH)
+      WRITE(6,*) OUTPUT_PATH
+
+      OPEN(UNIT=4, FILE=TRIM(OUTPUT_PATH) // 'mblock.log')
+      OPEN(UNIT=7, FILE=TRIM(OUTPUT_PATH) // 'coefficients.csv')
+      OPEN(UNIT=11,FILE=TRIM(OUTPUT_PATH) // 'stopit')
+      OPEN(UNIT=3, FILE=TRIM(OUTPUT_PATH) // 'gridin')
       IFSTOP = 0
       WRITE(11,*) IFSTOP
       CLOSE(11)
@@ -57,7 +61,7 @@ C
 C*****************************************************************************
 C
       IF(NSTEPS.EQ.0) THEN
-	   CALL PLOTOUT
+	   CALL PLOTOUT(OUTPUT_PATH)
 	   STOP
       ENDIF
 C
@@ -136,7 +140,7 @@ C
       DO 1000 NSTEP = 1,NSTEPS
 C
       IF(MOD(NSTEP,10).EQ.0) THEN
-      OPEN(UNIT=11,FILE='stopit')
+      OPEN(UNIT=11,FILE=TRIM(OUTPUT_PATH) // 'stopit')
       READ(11,*) IFSTOP
       CLOSE(11)
       ENDIF 
@@ -198,10 +202,10 @@ C
 C      CHECK IF A REQUEST TO STOP HAS BEEN RECEIVED EVERY 10 STEPS.
 C
       IF(MOD(NSTEP,10).EQ.0) THEN
-      IF(IFSTOP.GE.1) CALL PLOTOUT
+      IF(IFSTOP.GE.1) CALL PLOTOUT(OUTPUT_PATH)
       IF(IFSTOP.EQ.2) STOP
       IFSTOP = 0
-      OPEN(UNIT=11,FILE='stopit')      
+      OPEN(UNIT=11,FILE=TRIM(OUTPUT_PATH) // 'stopit')      
       WRITE(11,*) IFSTOP
       CLOSE(11)
       ENDIF 
@@ -242,7 +246,7 @@ C*******************************************************************************
 C
 C     WRITE OUT THE PLOTTING/RESTART FILE  'flowout'.
 C
-      CALL PLOTOUT
+      CALL PLOTOUT(OUTPUT_PATH)
 C
 C
       STOP
@@ -2874,7 +2878,7 @@ C      THIS OVERWRITES THE ABOVE INITIAL GUESS.
 C
       IF(IFRESTART.NE.0) THEN
 C
-      OPEN(UNIT=8,FILE='flowout',FORM = 'unformatted')
+      OPEN(UNIT=8,FILE=TRIM(OUTPUT_PATH)//'flowout')
 C
       WRITE(6,*)
       WRITE(6,*) ' READING IN THE RESTART FILE flowout FROM UNIT 8.'
@@ -4623,7 +4627,7 @@ C
 C
 C**********************************************************************
 C
-      SUBROUTINE PLOTOUT
+      SUBROUTINE PLOTOUT(OUTPUT_PATH)
 C
 C**********************************************************************
 C
@@ -4637,7 +4641,6 @@ c     RAS224:CORRECTION OF BUG.
 C
 C     EXTRA VARIABLES REQUIRED FOR THE TBLOCK-TO-VTK WRITER. JMB.
       CHARACTER*45 VTUNAME
-      CHARACTER*45 PATH,PATH1
       INTEGER IC, JC, KC, V211, V212, V221, V222	  
       REAL Y(NIM,NJM,NKM,NBLOCKS),Z(NIM,NJM,NKM,NBLOCKS),
      &     RO(NIM,NJM,NKM,NBLOCKS),
@@ -4649,8 +4652,12 @@ C     EXTRA VARIABLES REQUIRED FOR THE TBLOCK-TO-VTK WRITER. JMB.
      &     PSTAT(NIM,NJM,NKM,NBLOCKS),MACH(NIM,NJM,NKM,NBLOCKS),
      &     MWALL(NIM,NJM,NKM,NBLOCKS), MWALL_WING(NIM,NJM,NKM,NBLOCKS)
 C
-      OPEN(UNIT=8,FILE='flowout', FORM = 'unformatted')
-      OPEN(UNIT=9,FILE='gridout', FORM = 'unformatted')
+      CHARACTER*100 FLOWOUT_PATH, GRIDOUT_PATH
+      FLOWOUT_PATH = TRIM(OUTPUT_PATH)//'flowout'
+      GRIDOUT_PATH = TRIM(OUTPUT_PATH)//'gridout'
+
+      OPEN(UNIT=8, FORM='unformatted', FILE=FLOWOUT_PATH)
+      OPEN(UNIT=9, FORM='unformatted', FILE=GRIDOUT_PATH)
 C	  
       WRITE(8) NBLOCKS
 C
@@ -4802,7 +4809,7 @@ C
       WRITE(VTUNAME(6:6),'(I1)') NBLCK
       WRITE(VTUNAME(7:10),'(A4)') '.vtu'
 C	  
-      OPEN(UNIT=40,FILE=VTUNAME, FORM = 'formatted')
+      OPEN(UNIT=40, FILE=TRIM(OUTPUT_PATH)//VTUNAME, FORM = 'formatted')
 C
       WRITE(40,*)'<VTKFile type="UnstructuredGrid">'
       WRITE(40,*)'<UnstructuredGrid><Piece NumberOfPoints="',IM*JM*KM,
