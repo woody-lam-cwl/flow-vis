@@ -1,0 +1,9854 @@
+C23456789012345678901234567890123456789012345678901234567890123456789012C
+C
+C      MULTIBLOCK FLOW SOLVER. DEVELOPMENT STARTED BY JDD  3/4/2000.
+C
+      INCLUDE 'commall-29'
+C
+C
+      OPEN(UNIT=4, FILE='mblock.log')
+      OPEN(UNIT=11,FILE='stopit')
+      OPEN(UNIT=3, FILE='gridin')
+      IFSTOP = 0
+      WRITE(11,*) IFSTOP
+      CLOSE(11)
+C
+C
+      CALL READIN
+      WRITE(6,*) ' done readin'
+C
+C
+      CALL SET_PATCHES
+      WRITE(6,*) ' done set patches'
+C
+C
+      CALL GEN_GRID
+      WRITE(6,*) ' done gen grid'
+C
+C
+      IF(NINTFACE.NE.0) THEN
+      CALL SET_INTERPFACE
+      WRITE(6,*) ' done set_interpface'
+      WRITE(6,*)
+      ENDIF 
+C
+      WRITE(6,*) ' calling find areas, NINTFACE = ',NINTFACE
+C
+      CALL FIND_AREAS
+      WRITE(6,*) ' done find areas'
+C
+C
+      CALL INGUESS
+      WRITE(6,*) ' done initial guess'
+C
+      WRITE(6,*)
+      WRITE(6,*) ' TOTAL NUMBER OF GRID POINTS = ', NPOINT_TOT
+      WRITE(6,*)
+C
+C
+      IF(ILOS.NE.0) THEN
+      CALL SET_XLENGTH
+      WRITE(6,*) ' done set_xlength '
+      WRITE(6,*)
+      WRITE(6,*)
+      ENDIF
+C
+C
+C*****************************************************************************
+C
+      IF(NSTEPS.EQ.0) THEN
+	   CALL PLOTOUT
+	   STOP
+      ENDIF
+C
+C****************************************************************************
+C
+C
+C______DTS
+      IF (IF_DTS.EQ.1) THEN
+         NBTSTEP = 1
+         IF(IFRESTART.EQ.0) TIMTOT = 0.0
+      END IF
+C _____END DTS
+C
+      IF (IF_DTS.NE.1)      TIMTOT = 0.0   
+C 
+C
+C************************************************************************************
+C************************************************************************************
+C 
+C Each physical time step in a dual-timestepping calculation starts here
+C
+ 2000 CONTINUE
+C
+C
+C_____DTS
+      IF (IF_DTS.EQ.1) THEN
+         WRITE(6,200)  NBTSTEP
+         WRITE(6,205)  TIMTOT*1000.
+         DAVGALL_OLD = 100000.
+      END IF
+ 200  FORMAT (// ' Starting DTS physical timestep number: ',I5)
+ 205  FORMAT (   ' Physical time in simulation = ',F10.6, 'ms')
+C
+      IF (MOD(NSTEP,5).EQ.0) DAVGALL=0.
+C      
+C If start of DTS calc, initialise DTS variables:
+C
+      IF (IF_DTS.EQ.1 .AND. NBTSTEP.EQ.1) THEN
+         WRITE(6,*) ' Initialising DTS variables...' 
+         CALL DTS_INIT(ROALL,    ROGRPALL,    RONM1ALL)
+         CALL DTS_INIT(ROVXALL,  ROVXGRPALL,  ROVXNM1ALL)
+         CALL DTS_INIT(ROVRALL,  ROVRGRPALL,  ROVRNM1ALL)
+         CALL DTS_INIT(RORVTALL, RORVTGRPALL, RORVTNM1ALL)
+         CALL DTS_INIT(ROEALL,   ROEGRPALL,   ROENM1ALL)
+         WRITE(6,*) ' Done.'
+      END IF
+C      
+C If DTS calc, update DTS variables for this step:
+C
+      IF (IF_DTS.EQ.1 .AND. NBTSTEP.GT.1) THEN
+         WRITE(6,*) ' Updating DTS variables...' 
+         CALL DTS_UPDATE(ROALL,    ROGRPALL,    RONM1ALL)
+         CALL DTS_UPDATE(ROVXALL,  ROVXGRPALL,  ROVXNM1ALL)
+         CALL DTS_UPDATE(ROVRALL,  ROVRGRPALL,  ROVRNM1ALL)
+         CALL DTS_UPDATE(RORVTALL, RORVTGRPALL, RORVTNM1ALL)
+         CALL DTS_UPDATE(ROEALL,   ROEGRPALL,   ROENM1ALL)
+         WRITE(6,*) ' Done.'
+         SPEEDUP = TRU_STEP/DTMIN/FLOAT(NSTEP)
+         WRITE(6,*) ' DTS speedup factor for last physical timestep =',
+     &                SPEEDUP
+      END IF
+C______END DTS
+C
+C************************************************************************************
+C************************************************************************************
+C
+      WRITE(6,*) ' STARTING THE MAIN TIME STEPPING LOOP '
+      WRITE(6,*)
+      WRITE(6,*)
+C
+      START   = mclock()
+      START2  = mclock()
+C
+      DO 1000 NSTEP = 1,NSTEPS
+C
+      IF(MOD(NSTEP,10).EQ.0) THEN
+      OPEN(UNIT=11,FILE='stopit')
+      READ(11,*) IFSTOP
+      CLOSE(11)
+      ENDIF 
+C
+C
+      IF(MOD(NSTEP,5).EQ.0) THEN 
+      FINI = mclock()
+      TRUN = (FINI - START)*1.0e-06
+      TPOINT = TRUN/NPOINT_TOT/5
+      WRITE(6,21) TRUN, TPOINT 
+      START = mclock()    
+      ENDIF
+   21 FORMAT(' TIME FOR 5 STEPS= ',F10.3,
+     &       ' SECONDS, TIME PER POINT PER STEP= ',E12.5)
+C
+C
+      IF(MOD(NSTEP,100).EQ.0) THEN 
+      FINI2 = mclock()
+      TRUN = (FINI2 - START2)*1.0e-06
+      TPOINT = TRUN/NPOINT_TOT/100
+      WRITE(6,221) TRUN, TPOINT 
+      START2 = mclock()    
+      ENDIF
+  221 FORMAT(' TIME FOR 100 STEPS= ',F10.3,
+     &       ' SECONDS, TIME PER POINT PER STEP= ',E12.5)
+C
+C
+C    CHANGE THE SMOOTHING AND DAMPING OVER THE FIRST "NCHANGE" STEPS - UNLESS USING A RESTART.
+C
+      IF(IFRESTART.NE.0)     GO TO 1005
+      IF(NSTEP.GT.NCHANGE)   GO TO 1005
+      IF(IF_DTS.EQ.1)        GO TO 1005
+      FACUP = 1.0 - FLOAT(NSTEP)/NCHANGE
+      SFAC  = SFACIN + 0.02*FACUP
+      DAMP  = DAMPIN*(1.0 - 0.75*FACUP)
+      FACSEC = FACSECIN*(1.0 - FACUP)
+ 1005 CONTINUE
+C 
+C     
+      IF(MOD(NSTEP,5).EQ.0)THEN
+C
+      IF(IF_DTS.NE.1) WRITE(6,1001) NSTEP,CFL,SFAC,DAMP,FACSEC
+ 1001 FORMAT(' STEP NO.',I5,' CFL= ',F8.3,' SMOOTHING= ',F6.4,
+     & ' DAMP= ',F8.3,' FACSEC= ',F8.3)
+      IF(IF_DTS.EQ.1) WRITE(6,1002) NBTSTEP,NSTEP,CFL,SFAC,DAMP,FACSEC
+ 1002 FORMAT('OUTER TIME STEP No.',I4,' INNER TIME STEP No.',I4,
+     &' CFL=',F5.3,' SMOOTHING=',F6.4,' DAMP=',F6.3,' FACSEC=',F5.3)
+C
+      ENDIF
+C
+C**********Call to the main solver routine SET_FLUX. WHICH CALLS SUM_FLUX AND NUSMOOTH.
+C
+      CALL SET_FLUX
+C
+C**********Call BCONDS to apply all boundary conditions.
+C
+      CALL BCONDS
+C
+C      CHECK IF A REQUEST TO STOP HAS BEEN RECEIVED EVERY 10 STEPS.
+C
+      IF(MOD(NSTEP,10).EQ.0) THEN
+      IF(IFSTOP.GE.1) CALL PLOTOUT
+      IF(IFSTOP.EQ.2) STOP
+      IFSTOP = 0
+      OPEN(UNIT=11,FILE='stopit')      
+      WRITE(11,*) IFSTOP
+      CLOSE(11)
+      ENDIF 
+C
+C     CHECK CONVERGENCE OF DUAL TIME STEPPING
+C
+C-----DTS
+      IF (IF_DTS.EQ.1 .AND. MOD(NSTEP,5).EQ.0) THEN
+         DDAVGALL    = DAVGALL - DAVGALL_OLD
+         DAVGALL_OLD = DAVGALL
+         IF (DDAVGALL.LT.0.0.AND.ABS(DDAVGALL).LT.DTS_CONV.
+     &   AND.ABS(DAVGALL).LT.(10*DTS_CONV)) GO TO 1500
+      END IF
+C-----END DTS
+C
+C     END OF ONE EXPLICIT TIME STEP LOOP
+C
+ 1000 CONTINUE
+C
+C************************************************************************************
+C************************************************************************************
+C
+C------DTS
+C______ END OF ONE PHYSICAL TIME STEP IF USING DTS.
+C
+ 1500 CONTINUE
+C
+         NBTSTEP = NBTSTEP + 1
+         TIMTOT  = TIMTOT  + TRU_STEP
+C
+C
+      IF (IF_DTS.EQ.1 .AND. NBTSTEP.LT.NBTSTEPS) GO TO 2000
+C
+C_____END DTS
+C
+C************************************************************************************
+C************************************************************************************
+C
+C     WRITE OUT THE PLOTTING/RESTART FILE  'flowout'.
+C
+      CALL PLOTOUT
+C
+C
+      STOP
+      END
+C
+C
+C******************************************************************************
+C******************************************************************************
+C
+      SUBROUTINE READIN
+C
+      INCLUDE 'commall-29'
+C
+      PARAMETER(NJIN=150)
+C
+      DIMENSION  XIN(NIM),RIN(NIM),RTIN(NIM),FS(NIM),FSNEW(NIM),
+     &           FRACI(NIM),FRAC(NJIN),POINLET(NJIN),TOINLET(NJIN),
+     &           YAW_DEG(NJIN),PITCH_DEG(NJIN),PEXIT(NJIN),SPACE(MAXDIM)
+C
+      CHARACTER*72 BTITLE,PTITLE
+      CHARACTER*1  PTYPE,DUMMY
+C
+      PI = 3.1415926
+      READ(5,1000)  TITLE
+      WRITE(6,1000) TITLE
+C
+ 1000 FORMAT(A70)
+ 1010 FORMAT(8F12.5)
+ 1040 FORMAT(A1)
+C
+C
+C     READ IN THE GAS PROPERTIES, REFERENCE PROPERTIES AND CFL NUMBER.
+C
+      CP = 1005.
+      GA = 1.4
+      READ(5,*,ERR=345) CP,GA
+  345 CONTINUE
+      WRITE(6,*)  ' CP = ',CP, ' GAMMA= ',GA
+C
+      CFL = 0.4
+      READ(5,*,ERR=346) CFL
+  346 CONTINUE
+      WRITE(6,*)  'CFL NUMBER', CFL
+C
+      NSTEPS    = 3000
+      NCHANGE   = 1000
+      NSTEPUP   = 5
+      IFRESTART = 0
+      IFCHECK   = 0
+      IF_DTS    = 0
+      READ(5,*,ERR=347) NSTEPS,NCHANGE,NSTEPUP,IFRESTART,IFCHECK,IF_DTS
+  347 CONTINUE
+      WRITE(6,*) 'NSTEPS, NCHANGE, NSTEPUP, IFRESTART, IFCHECK, IF_DTS',
+     &            NSTEPS, NCHANGE, NSTEPUP, IFRESTART, IFCHECK, IF_DTS
+C
+      DAMPIN   = 10.
+      SFACIN   = 0.01
+      FACSECIN = 0.8
+      SUPERFAC = 0.25
+      READ(5,*,ERR=348) DAMPIN,SFACIN,FACSECIN,SUPERFAC
+  348 CONTINUE
+      WRITE(6,*)
+      WRITE(6,*) ' DAMPING FACTOR =               ',DAMPIN
+      WRITE(6,*) ' SMOOTHING FACTOR =             ',SFACIN
+      WRITE(6,*) ' PROP. OF 4th ORDER SMOOTHING = ',FACSECIN
+      WRITE(6,*) ' SUPERGRID FACTOR =             ',SUPERFAC
+      WRITE(6,*)
+C
+      SFACIN= SFACIN*CFL
+      DAMP  = DAMPIN
+      SFAC  = SFACIN
+      FACSEC= FACSECIN
+      CV    = CP/GA
+      RGAS  = CP-CV
+      FGA   = (GA-1.)/GA
+      RFGA  = 1./FGA
+      GA1   = GA-1.
+      GAMR  = GA*RGAS
+C
+C_____DTS
+      IF (IF_DTS.EQ.1) THEN
+         CYCLES    = 10.
+         FREQUENCY = 1000.
+         NSTEPS_PERCYCLE = 100
+         DTS_CONV = 0.0002
+         FACSAFE  = 0.25
+         READ(5,*,END=349)CYCLES,FREQUENCY,NSTEPS_PERCYCLE,DTS_CONV,
+     &   FACSAFE
+  349    CONTINUE
+         TRU_STEP = 1./(FREQUENCY*NSTEPS_PERCYCLE)
+         NBTSTEPS =  CYCLES*NSTEPS_PERCYCLE
+      END IF
+C_____END DTS
+C
+C*****************************************************************************
+C
+      READ(5,*)    NBLOCKS
+      WRITE(4,*)   NBLOCKS
+      WRITE(6,*) ' NUMBER OF BLOCKS TO BE SOLVED  = ',NBLOCKS
+C
+C******************************************************************************
+C
+      NPOINT_TOT = 0
+      NINTFACE   = 0
+      NSFACE     = 0
+C
+      DO  10000 NBLCK = 1,NBLOCKS
+C     
+
+     
+      WRITE(6,*)'*******************************************************
+     &*********************************************'     
+      WRITE(6,*) ' STARTING TO READ IN DATA FOR BLOCK NUMBER ',NBLCK
+C
+      READ(5,1040)  DUMMY
+      READ(5,1000)  BTITLE
+      READ(5,1040)  DUMMY
+C
+      WRITE(6,*)
+      WRITE(6,1000) BTITLE
+      WRITE(6,*)
+C 
+      INTYPE(NBLCK)        = 0
+      NSMOOTH(NBLCK)       = 0
+      NMATCH_LOOP(NBLCK)   = 1    
+      IFISMTH(NBLCK)       = 0
+      IFJSMTH(NBLCK)       = 0
+      IFKSMTH(NBLCK)       = 0     
+      READ(5,*,ERR=5)  INTYPE(NBLCK),NSMOOTH(NBLCK),NMATCH_LOOP(NBLCK),
+     &                 IFISMTH(NBLCK),IFJSMTH(NBLCK),IFKSMTH(NBLCK)
+    5 CONTINUE
+C
+      WRITE(6,*)' BLOCK NUMBER',NBLCK,'  INTYPE= ',INTYPE(NBLCK),
+     &  ' NSMOOTH = ',NSMOOTH(NBLCK),' NMATCH= ',NMATCH_LOOP(NBLCK)
+C
+      IF(IFISMTH(NBLCK).NE.0) WRITE(6,*) ' GRID SMOOTHED IN I DIR-N.'
+      IF(IFJSMTH(NBLCK).NE.0) WRITE(6,*) ' GRID SMOOTHED IN J DIR-N.'
+      IF(IFKSMTH(NBLCK).NE.0) WRITE(6,*) ' GRID SMOOTHED IN K DIR-N.'
+C
+C
+C     READ IN THE NUMBER OF CELLS ON EACH FACE OF THE BLOCK
+C
+      READ(5,*)   NI(NBLCK), NJ(NBLCK), NK(NBLCK)
+C
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+C
+      WRITE(6,*)' BLOCK NUMBER',NBLCK,' IM =',IM,' JM =',JM,' KM =',KM
+C
+      NPOINT_TOT = NPOINT_TOT + IM*JM*KM
+C
+C
+C***********************************************************************************
+C***********************************************************************************
+C
+C
+      IF(INTYPE(NBLCK).EQ.0) THEN
+C
+C     READ IN THE POINTS TO DEFINE THE BLOCK.
+C     THESE MUST INCLUDE THE 8 CORNER POINTS PLUS AS MANY MORE AS REQUIRED.
+C     INTERIOR POINTS CAN BE USED TO HELP SPACE THE GRID.
+C     THE POINTS CAN BE INPUT IN ANY ORDER.
+C
+C     'EXPO' Is the exponent used in defining the shape functions. EXPO = 1 gives a
+C      linear variation between input data points. = 1.25 -1.75 gives a smooth curve.
+C
+      READ(5,*) NPINPUT(NBLCK), EXPO(NBLCK)
+C
+      DO 700 N =1,NPINPUT(NBLCK)
+      READ(5,*) IGIN(N,NBLCK),JGIN(N,NBLCK),KGIN(N,NBLCK),
+     &          XGIN(N,NBLCK),RGIN(N,NBLCK),RTGIN(N,NBLCK)
+  700 CONTINUE
+C
+      WRITE(6,*)' BLOCK NUMBER',NBLCK,
+     &          ' INTYPE = 0, GEOMETRICAL DATA INPUT COMPLETE.'  
+C
+      ENDIF
+C
+C     END OF INTYPE = 0 INPUT.
+C
+C************************************************************************************
+C************************************************************************************
+C    
+      IF(INTYPE(NBLCK).EQ.1) THEN
+C
+C     READ IN THE COORDINATES OF THE CORNERS OF THE BLOCK
+C
+C     READ IN THE COORDINATES OF THE FOUR CORNERS OF THE I = 1 FACE
+C
+C
+      READ(5,*) XI1J1K1(NBLCK),RTI1J1K1(NBLCK),RI1J1K1(NBLCK)
+      READ(5,*) XI1JMK1(NBLCK),RTI1JMK1(NBLCK),RI1JMK1(NBLCK)
+      READ(5,*) XI1JMKM(NBLCK),RTI1JMKM(NBLCK),RI1JMKM(NBLCK)
+      READ(5,*) XI1J1KM(NBLCK),RTI1J1KM(NBLCK),RI1J1KM(NBLCK)
+C
+C     READ IN THE FOUR CORNERS OF THE I = IM FACE
+C
+      READ(5,*) XIMJ1K1(NBLCK),RTIMJ1K1(NBLCK),RIMJ1K1(NBLCK)
+      READ(5,*) XIMJMK1(NBLCK),RTIMJMK1(NBLCK),RIMJMK1(NBLCK)
+      READ(5,*) XIMJMKM(NBLCK),RTIMJMKM(NBLCK),RIMJMKM(NBLCK)
+      READ(5,*) XIMJ1KM(NBLCK),RTIMJ1KM(NBLCK),RIMJ1KM(NBLCK)
+C
+C
+      WRITE(6,*)' BLOCK NUMBER',NBLCK,
+     &          ' INTYPE = 1 GEOMETRICAL DATA INPUT COMPLETE.'  
+C
+      ENDIF
+C
+C     END OF INTYPE = 1 GEOMETRY INPUT
+C****************************************************************************
+C****************************************************************************
+C
+C     IF INTYPE = 2 THE GEOMETRY IS NOT A STRAIGHT LINE BETWEEN EDGES
+C     IT IS INPUT AS A SET OF COORDINATES AND RELATIVE GRID SPACINGS ALONG
+C     THE 4 EDGES  J=1,K=1.  J=1,K=KM.  J=JM,K=1.  J=JM,K= KM. 
+C
+C     THE GRID SPACINGS IN THE "I"  DIRECTION ARE SET BY FS(I).
+C
+      IF(INTYPE(NBLCK).EQ.2) THEN
+C
+C     INPUT THE COORDINATES ALONG THE J=1,K=1 EDGE. 
+C
+      READ(5,*) NINJ1K1
+C
+      DO 10 I = 1,NINJ1K1
+      READ(5,*)  XIN(I),RTIN(I),RIN(I),FS(I)
+      FRACI(I) = FLOAT(I-1)/FLOAT(NINJ1K1-1)
+   10 CONTINUE
+C
+      DO 13 I=1,IM
+      FRACIM = FLOAT(I-1)/FLOAT(IM-1)
+      CALL INTP(NINJ1K1,FRACI,FS,FRACIM,FSNEW(I))
+   13 CONTINUE
+C
+      SUM = 0.0
+      DO 14 I=2,IM
+      SUM = SUM + 0.5*(FSNEW(I)+FSNEW(I-1))
+   14 CONTINUE
+C
+      DO 15 I=1,IM
+      FSNEW(I) = FSNEW(I)/SUM
+   15 CONTINUE
+C
+      ARG = 0.0
+      DO 16 I=1,IM
+      IF(I.NE.1) ARG = ARG + 0.5*(FSNEW(I)+FSNEW(I-1)) 
+      CALL INTP(NINJ1K1,FRACI,XIN,ARG,X(I,1,1,NBLCK))
+      CALL INTP(NINJ1K1,FRACI,RIN,ARG,R(I,1,1,NBLCK))
+      CALL INTP(NINJ1K1,FRACI,RTIN,ARG,RT(I,1,1,NBLCK))   
+   16 CONTINUE 
+C
+      IF(IFCHECK.GE.1) THEN
+C
+      WRITE(6,*)
+      WRITE(6,*) ' INTERPOLATED COORDINATES OF THE J1, K1 CORNER '
+C
+      DO I=1,IM
+      WRITE(6,1010) X(I,1,1,NBLCK),R(I,1,1,NBLCK),RT(I,1,1,NBLCK)
+      END DO 
+C
+      ENDIF
+C
+C
+C      INPUT THE COORDINATES ALONG THE  J=1, K = KM EDGE
+C
+      READ(5,*) NINJ1KM
+C
+      DO 20 I = 1,NINJ1KM
+      READ(5,*) XIN(I),RTIN(I),RIN(I),FS(I)
+      FRACI(I) = FLOAT(I-1)/FLOAT(NINJ1KM-1)
+   20 CONTINUE
+C
+      DO 23 I=1,IM
+      FRACIM = FLOAT(I-1)/FLOAT(IM-1)
+      CALL INTP(NINJ1KM,FRACI,FS,FRACIM,FSNEW(I))
+   23 CONTINUE
+C
+      SUM = 0.0
+      DO 24 I=2,IM
+      SUM = SUM + 0.5*(FSNEW(I)+FSNEW(I-1))
+   24 CONTINUE
+C
+      DO 25 I=1,IM
+      FSNEW(I) = FSNEW(I)/SUM
+   25 CONTINUE
+C
+      ARG = 0.0
+      DO 26 I=1,IM
+      IF(I.NE.1) ARG = ARG + 0.5*(FSNEW(I)+FSNEW(I-1)) 
+      CALL INTP(NINJ1KM,FRACI,XIN,ARG,X(I,1,KM,NBLCK))
+      CALL INTP(NINJ1KM,FRACI,RIN,ARG,R(I,1,KM,NBLCK))
+      CALL INTP(NINJ1KM,FRACI,RTIN,ARG,RT(I,1,KM,NBLCK))   
+   26 CONTINUE 
+C
+      IF(IFCHECK.GE.1) THEN
+C
+      WRITE(6,*)
+      WRITE(6,*) ' INTERPOLATED COORDINATES OF THE J1, KM CORNER '
+C
+      DO I=1,IM
+      WRITE(6,1010)X(I,1,KM,NBLCK),R(I,1,KM,NBLCK),RT(I,1,KM,NBLCK)
+      END DO 
+C
+      ENDIF
+C  
+C
+C       INPUT THE COORDINATES ALONG THE J = JM, K = 1 EDGE.
+C
+      READ(5,*) NINJMK1
+C
+      DO 30 I = 1,NINJMK1
+      READ(5,*)  XIN(I),RTIN(I),RIN(I),FS(I)
+      FRACI(I) = FLOAT(I-1)/FLOAT(NINJMK1-1)
+   30 CONTINUE
+C
+      DO 33 I=1,IM
+      FRACIM = FLOAT(I-1)/FLOAT(IM-1)
+      CALL INTP(NINJMK1,FRACI,FS,FRACIM,FSNEW(I))
+   33 CONTINUE
+C
+      SUM = 0.0
+      DO 34 I=2,IM
+      SUM = SUM + 0.5*(FSNEW(I)+FSNEW(I-1))
+   34 CONTINUE
+C
+      DO 35 I=1,IM
+      FSNEW(I) = FSNEW(I)/SUM
+   35 CONTINUE
+C
+      ARG = 0.0
+      DO 36 I=1,IM
+      IF(I.NE.1) ARG = ARG + 0.5*(FSNEW(I)+FSNEW(I-1)) 
+      CALL INTP(NINJMK1,FRACI,XIN,ARG,X(I,JM,1,NBLCK))
+      CALL INTP(NINJMK1,FRACI,RIN,ARG,R(I,JM,1,NBLCK))
+      CALL INTP(NINJMK1,FRACI,RTIN,ARG,RT(I,JM,1,NBLCK))   
+   36 CONTINUE 
+C
+      IF(IFCHECK.GE.1) THEN
+C
+      WRITE(6,*)
+      WRITE(6,*) ' INTERPOLATED COORDINATES OF THE JM, K1 CORNER '
+C
+      DO I=1,IM
+      WRITE(6,1010)X(I,JM,1,NBLCK),R(I,JM,1,NBLCK),RT(I,JM,1,NBLCK)
+      END DO 
+C
+      ENDIF
+C
+C      INPUT THE COORDINATES ALONG THE J = JM, K = KM EDGE.
+C
+      READ(5,*)    NINJMKM
+C
+      DO 40  I = 1,NINJMKM
+      READ(5,*)   XIN(I),RTIN(I),RIN(I),FS(I)
+      FRACI(I) =  FLOAT(I-1)/FLOAT(NINJMKM-1)
+   40 CONTINUE
+C
+      DO 43 I=1,IM
+      FRACIM = FLOAT(I-1)/FLOAT(IM-1)
+      CALL INTP(NINJMKM,FRACI,FS,FRACIM,FSNEW(I))
+   43 CONTINUE
+C
+      SUM = 0.0
+      DO 44 I=2,IM
+      SUM = SUM + 0.5*(FSNEW(I)+FSNEW(I-1))
+   44 CONTINUE
+C
+      DO 45 I=1,IM
+      FSNEW(I) = FSNEW(I)/SUM
+   45 CONTINUE
+C
+      ARG = 0.0
+      DO 46 I=1,IM
+      IF(I.NE.1) ARG = ARG + 0.5*(FSNEW(I)+FSNEW(I-1)) 
+      CALL INTP(NINJMKM,FRACI,XIN,ARG,X(I,JM,KM,NBLCK))
+      CALL INTP(NINJMKM,FRACI,RIN,ARG,R(I,JM,KM,NBLCK))
+      CALL INTP(NINJMKM,FRACI,RTIN,ARG,RT(I,JM,KM,NBLCK))   
+   46 CONTINUE 
+C
+      IF(IFCHECK.GE.1) THEN
+C
+      WRITE(6,*)' INTERPOLATED COORDINATES OF THE JM, KM CORNER '
+C
+      DO I=1,IM
+      WRITE(6,1010)X(I,JM,KM,NBLCK),R(I,JM,KM,NBLCK),RT(I,JM,KM,NBLCK)
+      END DO 
+C
+      ENDIF
+C
+C
+      WRITE(6,*)' BLOCK NUMBER',NBLCK,
+     &          ' INTYPE = 2 GEOMETRICAL DATA INPUT COMPLETE.'    
+C
+C
+      ENDIF
+C
+C***************************************************************************************
+C****************************************************************************************
+C
+C     NEXT INPUT THE BLADE GEOMETRY IF IN "MULTIP" TYPE FORMAT.
+C
+C
+      IF(INTYPE(NBLCK).EQ.3.OR.INTYPE(NBLCK).EQ.5) THEN
+C
+C
+  550 FORMAT(8F10.5)
+C
+      IF_IINT(NBLCK) = 0
+      READ(5,*) NOSECT(NBLCK),  NI_IN, IGRID_START, IGRID_END,
+     &          NBLADES(NBLCK), IF_IINT(NBLCK)
+C
+C     NOTE THAT "IM_IN" BELOW DOES NOT NEED TO BE THE SAME AS "IM" IF
+C     INTERPOLATION IS USED TO SET UP A NEW GRID. I.E. IF "IF_IINT" IS NOT ZERO.
+C
+      IM_IN(NBLCK) = IGRID_END - IGRID_START  + 1
+C
+C
+      IF(IFCHECK.GE.1) THEN
+      WRITE(6,*)'INTYPE = 3 or 5,IGRID_START,IGRID_END,NI_IN,NBLADES.',
+     &           IGRID_START,IGRID_END,NI_IN,NBLADES(NBLCK)
+       ENDIF
+C
+C
+      DO 500 NSEC = 1,NOSECT(NBLCK)
+C
+      READ(5,550) FAC
+      READ(5,550) (XINB(NSEC,I,NBLCK),I=1,NI_IN)
+      DO 510 I=1,IM_IN(NBLCK)
+  510 XINB(NSEC,I,NBLCK) = XINB(NSEC,I+IGRID_START-1,NBLCK)*FAC
+C
+      READ(5,550) FAC
+      READ(5,550) (RTINB(NSEC,I,NBLCK),I=1,NI_IN)
+      DO 520 I=1,IM_IN(NBLCK)
+  520 RTINB(NSEC,I,NBLCK) = RTINB(NSEC,I+IGRID_START-1,NBLCK)*FAC
+C
+      READ(5,550) FAC
+      READ(5,550) (DRTINB(NSEC,I,NBLCK),I=1,NI_IN)
+      DO 530 I=1,IM_IN(NBLCK)
+  530 DRTINB(NSEC,I,NBLCK) = DRTINB(NSEC,I+IGRID_START-1,NBLCK)*FAC
+C
+      READ(5,550) FAC
+      READ(5,550) (RINB(NSEC,I,NBLCK),I=1,NI_IN)
+      DO 540 I=1,IM_IN(NBLCK)
+  540 RINB(NSEC,I,NBLCK) = RINB(NSEC,I+IGRID_START-1,NBLCK)*FAC
+C
+C
+      IF(IFCHECK.EQ.1) THEN
+C
+      WRITE(6,*)
+      WRITE(6,*) ' SECTION NUMBER ', NSEC
+      WRITE(6,*)
+      WRITE(6,*)  ' XIN'
+      WRITE(6,550)   (XINB(NSEC,I,NBLCK),I=1,IM_IN(NBLCK))
+C
+      WRITE(6,*) ' RT-IN'
+      WRITE(6,550)   (RTINB(NSEC,I,NBLCK),I=1,IM_IN(NBLCK))
+C
+      WRITE(6,*)  ' DRT-IN'
+      WRITE(6,550)   (DRTINB(NSEC,I,NBLCK),I=1,IM_IN(NBLCK))
+C
+      WRITE(6,*)  ' RADIUS '
+      WRITE(6,550)   (RINB(NSEC,I,NBLCK),I=1,IM_IN(NBLCK))
+C
+      ENDIF
+C
+  500 CONTINUE
+C
+C
+      WRITE(6,*)' BLOCK NUMBER',NBLCK,
+     &          ' INTYPE = 3 GEOMETRICAL DATA INPUT COMPLETE.'  
+C
+C 
+C
+C
+      ENDIF
+C
+C*******************************************************************************
+C*******************************************************************************
+C
+      IF(INTYPE(NBLCK).EQ.4) THEN
+C
+C     READ IN THE GRID COORDINATES DIRECTLY FROM UNIT 3.
+C
+      WRITE(6,*) ' READING IN GRID COORDINATES FROM UNIT 3'
+      WRITE(6,*) ' BLOCK NUMBER',NBLCK
+C
+      DO 600 K=1,KM
+      DO 600 J=1,JM
+      DO 600 I=1,IM
+      READ(3,650) X(I,J,K,NBLCK),RT(I,J,K,NBLCK),R(I,J,K,NBLCK)
+  600 CONTINUE
+  650 FORMAT(3F10.5)
+C
+C
+      WRITE(6,*)' BLOCK NUMBER',NBLCK,
+     &          ' INTYPE = 4 GEOMETRICAL DATA INPUT COMPLETE.'   
+C
+      ENDIF
+C
+C    
+C********************************************************************************
+C********************************************************************************
+C  
+C
+C       READ IN THE COORDINATE SCALING AND SHIFTS. THESE AEW USED FOR ALL TYPES
+C       OF INPUT EXCEPT FOR INTYPE = 4 AND FOR THE I DIRECTION WHEN INTYPE = 2.
+C
+      SCALE(NBLCK) = 1.0
+      XMOVE(NBLCK) = 0.0
+      RMOVE(NBLCK) = 0.0
+      RTMOVE(NBLCK)= 0.0 
+C  
+      READ(5,*) DUMMY
+      READ(5,*,ERR=356) SCALE(NBLCK),XMOVE(NBLCK),RMOVE(NBLCK),
+     &                  RTMOVE(NBLCK)
+  356 CONTINUE
+      READ(5,*) DUMMY
+C
+C    
+C     INPUT THE GRID EXPANSION RATIOS. FOR ALL TYPES OF INPUT
+C
+      WRITE(6,*) ' BLOCK NUMBER',NBLCK, ' READING IN THE GRID SPACINGS.'
+C
+      FIRAT  = 1.2
+      FIMAX  = 5.0
+      FIEND  = 1.0
+      READ(5,*,ERR=357)   FIRAT,FIMAX,FIEND
+  357 CONTINUE
+      IF(FIRAT.LT.0.000001) READ(5,*) (SPACE(I),I=1,IM-1)
+      CALL GRIDSPACE(NBLCK,IM,NIM,NBLK,FIRAT,FIMAX,FIEND,FI,SPACE)
+C
+      FJRAT  = 1.2
+      FJMAX  = 5.0
+      FJEND  = 1.0
+      READ(5,*,ERR=358)   FJRAT,FJMAX,FJEND
+  358 CONTINUE
+      IF(FJRAT.LT.0.000001) READ(5,*)  (SPACE(J),J=1,JM-1)
+      CALL GRIDSPACE(NBLCK,JM,NJM,NBLK,FJRAT,FJMAX,FJEND,FJ,SPACE)
+C
+      FKRAT  = 1.2
+      FKMAX  = 5.0
+      FKEND  = 1.0
+      READ(5,*,ERR=359)   FKRAT,FKMAX,FKEND
+  359 CONTINUE
+      IF(FKRAT.LT.0.000001) READ(5,*)  (SPACE(K),K=1,KM-1)
+      CALL GRIDSPACE(NBLCK,KM,NKM,NBLK,FKRAT,FKMAX,FKEND,FK,SPACE)
+C
+C
+      IF(IFCHECK.GE.1) THEN
+C
+      WRITE(6,*)
+      WRITE(6,*) ' GRID SPACINGS IN I DIRECTION '
+      WRITE(6,123)  (FI(I,NBLCK),I=1,IM)
+C
+      WRITE(6,*)
+      WRITE(6,*) ' GRID SPACINGS IN J DIRECTION '
+      WRITE(6,123)  (FJ(J,NBLCK),J=1,JM)
+C
+      WRITE(6,*)
+      WRITE(6,*) ' GRID SPACINGS IN K DIRECTION '
+      WRITE(6,123)  (FK(K,NBLCK),K=1,KM)
+C
+  123 FORMAT(8F10.5)
+C
+      ENDIF
+C 
+C  
+      WRITE(6,*) ' BLOCK NUMBER',NBLCK,
+     &           ' GRID EXPANSION RATIOS SET BY GRIDSPACE.' 
+C  
+C 
+C******************************************************************************
+C   NOW START  TO READ IN THE DATA FOR THE PATCHES.
+C******************************************************************************
+C
+C
+C     READ IN THE NUMBER OF PATCHES IN THIS BLOCK
+C
+      READ(5,1040) DUMMY
+      READ(5,*)    NPATCH(NBLCK)
+      WRITE(6,*) ' BLOCK NUMBER',NBLCK,' HAS',NPATCH(NBLCK),' PATCHES.'
+C
+C
+      DO 200 NPTCH = 1,NPATCH(NBLCK)
+C
+      WRITE(6,*)'****************************************************'
+      WRITE(6,*)' BLOCK NUMBER',NBLCK,
+     &          ' INPUTTING DATA FOR PATCH NUMBER ',NPTCH
+C
+      READ(5,1040)  DUMMY
+      READ(5,1000)  PTITLE
+      READ(5,1040)  DUMMY
+C
+C      READ IN THE TYPES OF PATCH. AND WHETHER OR NOT TO ADJUST THE GRID.
+C
+C     PTYPE = "I"  MEANS AN INLET BOUNDARY PATCH.
+C     PTYPE = "E"  MEANS AN EXIT  BOUNDARY PATCH.
+C     PTYPE = "S"  MEANS A SOLID BOUNDARY PATCH.
+C     PTYPE = "P"  MEANS A PERIODIC BOUNDARY ie AN INTERFACE PATCH, WITH
+C                  A CONTIGUOUS GRID. 
+C     PTYPE = "S"  MEANS A SOLID BOUNDARY PATCH.
+C     PTYPE = "B"  MEANS A PERIODIC BOUNDARY THAT IS MATCHED TO ONE OF EXACTLY THE
+C                  SAME GEOMETRY BUT SPACED 1 BLADE PITCH AWAY IN THE CIRCUMFERENTIAL
+C                  DIRECTION.
+C     PTYPE = "N"  MEANS A PERIODIC BOUNDARY WITH NON-CONTIGUOUS GRID SO THAT
+C                  INTERPOLATION IS NEEDED.
+C     PTYPE = "M"  MEANS A MIXING PLANE WHERE ONLY THE PITCHWISE AVERAGE FLOW
+C                  IS PASSED TO THE NEXT BLOCK.
+C     PTYPE = "U"  MEANS THAT A SLIDING INTERFACE IS USED TO TRANSFER DATA BETWEEN
+C                  BLOCKS IN RELATIVE MOTION IN UNSTEADY FLOW.
+C
+C     PTYPE = "F"   MEANS A BOUNDARY WITH FIXED FLOW CONDITIONS IMPOSED ON IT.
+C   
+      READ(5,1040)  PATCHTYPE(NPTCH,NBLCK)
+      PTYPE      =  PATCHTYPE(NPTCH,NBLCK)
+C
+C
+C     READ IN THE MARKERS FOR PATCH MATCHING AND PATCH SMOOTHING.
+C
+C     "NMATCH_ON"         IS THE NUMBER OF GRID POINTS MOVED ON THE SURFACE
+C                         CONTAINING THEPATCH WHEN A PATCH IS MATCHED TO ITS 
+C                         ADJACENT PATCH.
+C
+C     "NMATCH_OFF"        IS THE NUMBER OF GRID POINTS MOVED IN ADJACENT PLANES
+C                         TO THE SURFACE CONTAINING THE PATCH WHEN A PATCH IS 
+C                         MATCHED TO ITS ADJACENT PATCH.
+C
+C   IF  MATCH_TYPE  = 0   THE PATCH IS DEFINED BY THE INPUT GRID COORDINATES
+C                         OF THE BLOCK IT IS IN.
+C
+C   IF  MATCH_TYPE  = 1   THE PATCH IS DEFINED BY MATCHING IT TO ITS ADJACENT PATCH,
+C                         WHICH HAS THE SAME RANGE OF GRID POINTS, USING 
+C                         SUBROUTINE "MATCH_PATCH".
+C
+C   IF  MATCH_TYPE  = 2   THE PATCH IS DEFINED BY THE COORDINATES OF ITS EDGES
+C                         WHICH ARE INPUT AS DATA USING SUBROUTINE "GRID_PATCH".
+C
+C   IF  MATCH_TYPE  = 3   THE PATCH IS DEFINED BY MATCHING IT TO ITS ADJACENT PATCH
+C                         WHICH MAY HAVE A DIFFERENT NUMBER OF GRID POINTS, USING
+C                         SUBROUTINE "GET_PATCH".
+C
+C   IF "IFPSMOOTH"  = 0.  DO NOT SMOOTH THE 4 PATCH CORNER POINTS.
+C   IF "IFPSMOOTH"  = 1.  DO NOT SMOOTH THE PATCH EDGES.
+C   IF "IFPSMOOTH"  = 2.  DO NOT SMOOTH ANY POINTS IN THE PATCH OR ITS EDGES.
+C
+C   "FRACSHIFT" IS THE FRACTION OF THE MOVEMENT REQUIRED TO FULLY MATCH 
+C   THAT IS USED THIS DEFAULTS TO 1.0
+C
+C
+      MATCH_TYPE(NPTCH,NBLCK) = 1
+      NMATCH_ON(NPTCH,NBLCK)  = 10
+      NMATCH_OFF(NPTCH,NBLCK) = 10
+      IFPSMOOTH(NPTCH,NBLCK)  = 2
+      FRACSHIFT(NPTCH,NBLCK)  = 1.0
+      READ(5,*,ERR=91 ) MATCH_TYPE(NPTCH,NBLCK),NMATCH_ON(NPTCH,NBLCK),
+     &                  NMATCH_OFF(NPTCH,NBLCK),IFPSMOOTH(NPTCH,NBLCK),
+     &                  FRACSHIFT(NPTCH,NBLCK)
+   91 CONTINUE
+C
+C     THE PATCH CORNER INTEGERS AND COORDINATES ARE NEXT INPUT.
+C     READ IN THE BOUNDARIES OF THE PATCH. THESE ARE THE OUTER LIMITS
+C     OF THE PATCH AREA NOT THE CELL INDICES WHICH ARE THE SAME FOR THE
+C     INNER LIMITS BUT ONE LESS FOR THE OUTER LIMITS
+C
+      READ(5,*)    IPATCHS(NPTCH,NBLCK),IPATCHE(NPTCH,NBLCK),
+     &             JPATCHS(NPTCH,NBLCK),JPATCHE(NPTCH,NBLCK),
+     &             KPATCHS(NPTCH,NBLCK),KPATCHE(NPTCH,NBLCK)
+C
+C
+C     READ IN THE GRID POINTS AND COORDINATES OF THE PATCH EDGES
+C     IF "MATCH_TYPE" = 2.
+C
+      IF(MATCH_TYPE(NPTCH,NBLCK).EQ.2)  THEN
+C
+      READ(5,*) NPATCHIN(NPTCH,NBLCK),EXPATIN(NPTCH,NBLCK)
+C
+      DO 50 N =1,NPATCHIN(NPTCH,NBLCK)
+C
+      READ(5,*)  IPATIN(NPTCH,N,NBLCK), JPATIN(NPTCH,N,NBLCK),
+     &           KPATIN(NPTCH,N,NBLCK), XPATIN(NPTCH,N,NBLCK),
+     &           RPATIN(NPTCH,N,NBLCK), RTPATIN(NPTCH,N,NBLCK)
+C
+      IF(IPATCHS(NPTCH,NBLCK).EQ.IPATCHE(NPTCH,NBLCK)) 
+     &                 IPATIN(NPTCH,N,NBLCK) = IPATCHS(NPTCH,NBLCK)
+      IF(JPATCHS(NPTCH,NBLCK).EQ.JPATCHE(NPTCH,NBLCK))
+     &                 JPATIN(NPTCH,N,NBLCK) = JPATCHS(NPTCH,NBLCK)
+      IF(KPATCHS(NPTCH,NBLCK).EQ.KPATCHE(NPTCH,NBLCK))
+     &                 KPATIN(NPTCH,N,NBLCK) = KPATCHS(NPTCH,NBLCK)
+C
+   50 CONTINUE
+C
+      WRITE(6,*) ' PATCH DETAILS READ IN FOR GRID_PATCH'
+C
+      ENDIF
+C
+C************************************************************************
+C************************************************************************
+C
+C     READ IN THE BOUNDARY CONDITIONS ON THE PATCHES.
+C
+C
+C     FIRST READ IN ANY INLET BOUNDARY CONDITIONS
+C
+      IF(PTYPE.EQ.'I') THEN
+C
+      WRITE(6,*) 
+      WRITE(6,*) ' INLET BOUNDARY CONDITION, BLOCK No',NBLCK, 
+     &           ' PATCH No', NPTCH
+      WRITE(6,*) ' FRAC   , PO ,   TO ,  YAW ,  PITCH. '    
+C
+      NPIN                 = 1
+      IFRELIN(NPTCH,NBLCK) = 0
+      RFINLET(NPTCH,NBLCK) = 0.5
+      READ(5,*,ERR=95) NPIN,IFRELIN(NPTCH,NBLCK),RFINLET(NPTCH,NBLCK)
+   95 CONTINUE
+C
+      IF(NPIN.GT.NJIN) THEN
+      WRITE(6,*)
+     & ' Stopping because dimension NJIN is too small in readin'
+      WRITE(6,*) ' NPIN = ', NPIN, ' NJIN = ', NJIN
+      STOP
+      ENDIF
+C
+      DO 99 N=1,NPIN
+      READ(5,*) FRAC(N),POINLET(N),TOINLET(N),YAW_DEG(N),PITCH_DEG(N)
+      WRITE(6,*)FRAC(N),POINLET(N),TOINLET(N),YAW_DEG(N),PITCH_DEG(N)
+   99 CONTINUE
+
+C
+      DEGRAD = PI/180.0
+C
+C     INTERPOLATE IN THE INPUT DATA TO FIND THE INLET CONDITIONS ON THE GRID LINES.
+C
+      DO 88 J=1,JM
+C
+      IF(NPIN.EQ.1) THEN
+           POIN(NPTCH,J,NBLCK) = POINLET(1)
+           TOIN(NPTCH,J,NBLCK) = TOINLET(1)
+           YAW                 = YAW_DEG(1)
+           PITCH               = PITCH_DEG(1)      
+      ELSE
+           ARG = FJ(J,NBLCK)
+           CALL INTP(NPIN,FRAC,POINLET,ARG,POIN(NPTCH,J,NBLCK))
+           CALL INTP(NPIN,FRAC,TOINLET,ARG,TOIN(NPTCH,J,NBLCK))
+           CALL INTP(NPIN,FRAC,YAW_DEG,ARG,YAW)
+           CALL INTP(NPIN,FRAC,PITCH_DEG,ARG,PITCH)
+      ENDIF
+           COSBXMER(NPTCH,J,NBLCK) = COS(PITCH*DEGRAD)
+           SINBXMER(NPTCH,J,NBLCK) = SIN(PITCH*DEGRAD)
+C
+      IF(IFRELIN(NPTCH,NBLCK).EQ.2) THEN
+           VTINLET(NPTCH,J,NBLCK) = YAW
+      ELSE
+           COSBTMER(NPTCH,J,NBLCK)   = COS(YAW*DEGRAD)
+           SINBTMER(NPTCH,J,NBLCK)   = SIN(YAW*DEGRAD)
+      ENDIF
+C
+   88 CONTINUE         
+C
+      ENDIF
+C
+C     END OF INLET BOUNDARY CONDITIONS
+C
+C
+C************************************************************************
+C************************************************************************
+C
+C     NEXT READ IN ANY FIXED INFLOW BOUNDARY CONDITIONS
+C
+      IF(PTYPE.EQ.'F') THEN
+C
+      READ(5,*) POFIXED(NPTCH,NBLCK),TOFIXED(NPTCH,NBLCK),
+     &          VXFIXED(NPTCH,NBLCK),VTFIXED(NPTCH,NBLCK),
+     &          VRFIXED(NPTCH,NBLCK)
+C
+      ENDIF
+C
+C     
+C************************************************************************
+C************************************************************************
+
+C     NEXT READ IN ANY OUTLET BOUNDARY CONDITIONS
+C
+
+      IF(PTYPE.EQ.'E') THEN
+C
+      WRITE(6,*)' EXIT BOUNDARY CONDITION, BLOCK No, PATCH No',
+     &            NBLCK,NPTCH
+      NPOUT                 = 1
+      I_EXBCS(NPTCH,NBLCK)  = 0
+      I_POUT(NPTCH,NBLCK)   = 0
+      FREFLECT(NPTCH,NBLCK) = 0.1
+      READ(5,*,ERR=82) NPOUT,I_EXBCS(NPTCH,NBLCK),I_POUT(NPTCH,NBLCK),
+     &                 FREFLECT(NPTCH,NBLCK)
+   82 CONTINUE
+C
+C
+      IF(NPOUT.GT.NJIN) THEN
+      WRITE(6,*)
+     & ' Stopping because dimension NJIN is too small in readin'
+      WRITE(6,*) ' NJIN = ', NJIN, 'NPOUT = ', NPOUT
+      IF(NPOUT.GT.NJIN) STOP
+      ENDIF
+C
+      DO 87  N=1,NPOUT
+      READ(5,*)  FRAC(N),PEXIT(N)
+      WRITE(6,*) N, FRAC(N),PEXIT(N)
+   87 CONTINUE
+C
+C     INTERPOLATE IN THE INPUT DATA TO FIND THE OUTLET PRESSURE ON THE GRID LINES.
+C
+      DO 89 J=1,JM
+C
+      IF(NPOUT.EQ.1) THEN
+           POUT(NPTCH,J,NBLCK) = PEXIT(1)
+      ELSE
+           ARG = FJ(J,NBLCK)
+           CALL INTP(NPOUT,FRAC,PEXIT,ARG,POUT(NPTCH,J,NBLCK))
+      ENDIF
+C
+   89 CONTINUE
+C
+      ENDIF         
+C
+C     END OF EXIT BOUNDARY CONDITIONS INPUT.
+C
+C************************************************************************
+C************************************************************************
+C
+C     NEXT INPUT THE NEXT BLOCK AND PATCH FOR A PERIODIC BOUNDARY
+C     FIRST SET DEFAULTS
+C
+           NEXT_I(NPTCH,NBLCK) = '+I'
+           NEXT_J(NPTCH,NBLCK) = '+J'
+           NEXT_K(NPTCH,NBLCK) = '+K'
+C
+      IF(PTYPE.EQ.'P') THEN
+      READ(5,*,ERR=98) NEXT_BLOCK(NPTCH,NBLCK),NEXT_PATCH(NPTCH,NBLCK),
+     &      NEXT_I(NPTCH,NBLCK),NEXT_J(NPTCH,NBLCK),NEXT_K(NPTCH,NBLCK)
+   98 CONTINUE
+      ENDIF
+C
+C     NEXT INPUT THE NEXT BLOCK AND PATCH FOR A PERIODIC BOUNDARY SPACED
+C     EXACTLY ONE BLADE PITCH AWAY FROM THE CURRENT PATCH.
+C
+      IF(PTYPE.EQ.'B') THEN
+      READ(5,*,ERR=97) NEXT_BLOCK(NPTCH,NBLCK),NEXT_PATCH(NPTCH,NBLCK),
+     &     NEXT_I(NPTCH,NBLCK),NEXT_J(NPTCH,NBLCK),NEXT_K(NPTCH,NBLCK),
+     &     NOBLADES(NPTCH,NBLCK)
+   97 CONTINUE
+      ENDIF
+C
+C     NEXT INPUT THE NEXT BLOCK AND PATCH FOR A MIXING PLANE TYPE OF INTERFACE.
+C
+      IF(PTYPE.EQ.'M') THEN
+      READ(5,*) NEXT_BLOCK(NPTCH,NBLCK),NEXT_PATCH(NPTCH,NBLCK)
+C
+      IF( IPATCHS(NPTCH,NBLCK).NE.IPATCHE(NPTCH,NBLCK)) THEN
+      WRITE(6,*) 'SERIOUS ERROR! MIXING PLANE NOT ON  I  FACE OF BLOCK.'
+      WRITE(6,*) 'BLOCK NUMBER ', NBLCK,' PATCH NUMBER ', NPTCH
+      ENDIF  
+C
+      ENDIF
+C
+C************************************************************************
+C************************************************************************
+C
+C     NEXT INPUT THE NEXT BLOCK AND PATCH FOR A PERIODIC BOUNDARY WHERE THE
+C     GRID POINTS ARE NOT CONTIGUOUS.
+C
+      IF(PTYPE.EQ.'N') THEN
+C
+      NINTFACE              = NINTFACE + 1
+      INT_TYPE(NPTCH,NBLCK) = 1
+      NPINTERP(NPTCH,NBLCK) = 4
+      READ(5,*,ERR=101)NEXT_BLOCK(NPTCH,NBLCK),NEXT_PATCH(NPTCH,NBLCK),
+     &                 INT_TYPE(NPTCH,NBLCK),NPINTERP(NPTCH,NBLCK)
+  101 CONTINUE
+C
+      IF(IFCHECK.GE.1)
+     & WRITE(6,*)' INTERPOLATED FACE, INT_TYPE= ',INT_TYPE(NPTCH,NBLCK),
+     &           ' NPINTERP = ',NPINTERP(NPTCH,NBLCK)
+C
+      ENDIF
+C
+C
+C
+C     NEXT INPUT THE NEXT BLOCK AND PATCH FOR A BOUNDARY BETWEEN BLOCKS IN RELATIVE
+C     MOTION - A SLIDING INTERFACE.
+C 
+       IF(PTYPE.EQ.'U') THEN
+C
+      NSFACE            = NSFACE + 1
+      NBLKSLIDE(NSFACE) = NBLCK
+      NPCHSLIDE(NSFACE) = NPTCH
+C
+C
+      READ(5,*)  N_NEXTFACE(NSFACE),FRAC_ANN(NSFACE)
+C
+      DO 110 N = 1,N_NEXTFACE(NSFACE)
+      READ(5,*) NXBLK_SLIDE(NSFACE,N), NXPTCH_SLIDE(NSFACE,N)
+  110 CONTINUE 
+      NSLIDEFACE = NSFACE        
+C
+      ENDIF  
+C
+C
+C************************************************************************
+C************************************************************************ 
+C
+C     WRITE OUT THE PATCH DETAILS IF "IFCHECK" IS NOT ZERO.
+C
+      IF(IFCHECK.GE.1) THEN
+C
+      WRITE(6,*)
+      WRITE(6,*) ' PATCH NUMBER   ', NPTCH
+      WRITE(6,*) ' PATCH TYPE =   ', PTYPE
+      WRITE(6,*) ' MATCH TYPE =   ', MATCH_TYPE(NPTCH,NBLCK)
+C
+      WRITE(6,*) ' PATCH START AND END POINTS'
+      WRITE(6,*) ' IPATCHS, IPATCHE ', IPATCHS(NPTCH,NBLCK),
+     &                                 IPATCHE(NPTCH,NBLCK)
+      WRITE(6,*) ' JPATCHS, JPATCHE ', JPATCHS(NPTCH,NBLCK),
+     &                                 JPATCHE(NPTCH,NBLCK)
+      WRITE(6,*) ' KPATCHS, KPATCHE ', KPATCHS(NPTCH,NBLCK),
+     &                                 KPATCHE(NPTCH,NBLCK)
+      WRITE(6,*) ' NEXT BLOCK = ', NEXT_BLOCK(NPTCH,NBLCK)
+      WRITE(6,*) ' NEXT PATCH = ', NEXT_PATCH(NPTCH,NBLCK)
+C
+      ENDIF
+C  
+      WRITE(6,*)' DATA INPUT COMPLETE FOR BLOCK No.',NBLCK,' PATCH No.',
+     &            NPTCH
+C
+C           
+C     END OF ALL INPUT FOR THIS PATCH
+C
+C
+  200 CONTINUE
+C
+C*****************************************************************************
+C*****************************************************************************
+C
+C     READ IN THE ROTATIONAL SPEED OF THIS BLOCK IN RPM,
+C     THE MULTIGRID TIME STEP FACTOR "FMGRID" AND THE MIXING LENGTH
+C     LIMIT AS A FRACTION OF THE SMALLEST BLOCK DIMENSION.
+C
+      WRITE(6,*)  ' ABOUT TO READ IN RPM, ETC. '
+      READ(5,1040)  DUMMY
+      RPMBLOCK      = 0.0
+      FMGRID(NBLCK) = 0.4
+      XLLIMM(NBLCK) = 0.03
+      READ(5,*,ERR=222)     RPMBLOCK, FMGRID(NBLCK), XLLIMM(NBLCK)
+  222 CONTINUE
+C
+      WRITE(6,*)
+      WRITE(6,*) ' RPM =',RPMBLOCK,' FMGRID =',FMGRID(NBLCK),' XLLIM =',
+     &             XLLIMM(NBLCK)
+C
+C
+      RPMI1  = RPMBLOCK
+      RPMIM  = RPMBLOCK
+      RPMJ1  = RPMBLOCK
+      RPMJM  = RPMBLOCK
+      RPMK1  = RPMBLOCK
+      RPMKM  = RPMBLOCK
+C
+C     READ IN THE ROTATIONAL SPEED OF THE BLOCK BOUNDARIES.
+C     THE DEFAULT IS THAT THEY ARE THE SAME AS THAT OF THE BLOCK.
+C
+      READ(5,*,ERR=201) RPMI1,RPMIM,RPMJ1,RPMJM,RPMK1,RPMKM
+  201 CONTINUE
+      READ(5,1040) DUMMY
+      WRITE(6,*) ' READ  IN RPMI1, RPMIM, --- etc'
+C
+C
+      WRITE(6,*)
+      WRITE(6,*)  ' DATA INPUT COMPLETE FOR BLOCK No. ', NBLCK
+      WRITE(6,*)  ' NUMBER OF PATCHES ON THIS BLOCK = ', NPATCH(NBLCK)
+      WRITE(6,*)'*******************************************************
+     &*********************************************'
+C
+      WROTBLK(NBLCK) = RPMBLOCK*PI/30.
+      WROTI1(NBLCK)  = RPMI1*PI/30.
+      WROTIM(NBLCK)  = RPMIM*PI/30.
+      WROTJ1(NBLCK)  = RPMJ1*PI/30.
+      WROTJM(NBLCK)  = RPMJM*PI/30.
+      WROTK1(NBLCK)  = RPMK1*PI/30
+      WROTKM(NBLCK)  = RPMKM*PI/30
+C
+      IF(FMGRID(NBLCK).LT.0.01) FMGRID(NBLCK) = 0.5
+C
+10000 CONTINUE
+C
+C******************************************************************************
+C******************************************************************************
+C
+C     READ IN THE VISCOUS DATA
+C
+      WRITE(6,*) ' READING IN THE VISCOUS DATA.'
+C
+      ILOS    = 9
+      NLOS    = 5
+      NSETVIS = 2
+      REYNO   = 500000.
+      FEXTRAP = 0.8
+      YPLUSW  = 11.0
+      RFVIS   = 0.2
+      PRANDTL = 1.0
+C
+      READ(5,1040) DUMMY
+      READ(5,*,ERR=223 ) ILOS,NLOS,NSETVIS,REYNO,FEXTRAP,YPLUSW,RFVIS,
+     &                   PRANDTL
+  223 CONTINUE
+      READ(5,1040) DUMMY
+C
+      WRITE(6,*)'ILOS,NLOS,NSETVIS,REYNO,FEXTRAP,YPLUSW,RFVIS,PRANDTL',
+     &           ILOS,NLOS,NSETVIS,REYNO,FEXTRAP,YPLUSW,RFVIS,PRANDTL
+      WRITE(6,*) ' REYNOLDS No.= ',REYNO,' PRANDTL No.= ',PRANDTL
+C
+      WRITE(6,*) ' VISCOUS DATA INPUT COMPLETED. '
+C
+      CFWALL  = 1./(YPLUSW*YPLUSW)
+C
+C
+      WRITE(6,*) ' LEAVING SUBROUTINE READIN. '
+C
+      RETURN
+      END
+C
+C******************************************************************************
+C******************************************************************************
+C
+      SUBROUTINE SET_PATCHES
+C
+      INCLUDE 'commall-29'
+C
+      CHARACTER*1 PTYP
+      CHARACTER*2 NXI,NXJ,NXK
+C
+      WRITE(6,*) ' ENTERED SET_PATCHES. '
+C
+C     THIS SUBROUTINE SETS THE WALL MASS FLOW FACTOR MWALL = 0 or 1.
+C     IT ALSO SETS THE POINTS TO BE USED FOR INTERPOLATION ON NON-CONTIGUOUS PATCHES.
+C
+C
+C
+C     ENSURE THAT IF 'MATCH_TYPE' IS NOT = 0 THE BOUNDARIES OF THE PATCH AND ITS
+C     ADJACENT PATCH ARE NOT AFFECTED BY ANY GRID SMOOTHING, ie SET IPSMOOTH = 2.
+C
+      DO 10 NBLCK = 1,NBLOCKS
+      DO 10 NP    = 1,NPATCH(NBLCK)
+      IF(MATCH_TYPE(NP,NBLCK).NE.0) THEN
+      NXBLCK  =  NEXT_BLOCK(NP,NBLCK)
+      NXPTCH  =  NEXT_PATCH(NP,NBLCK)
+      IF(IFPSMOOTH(NP,NBLCK).EQ.0)      IFPSMOOTH(NP,NBLCK)       = 2
+      IF(IFPSMOOTH(NXPTCH,NXBLCK).EQ.0) IFPSMOOTH(NXPTCH,NXBLCK)  = 2
+      ENDIF
+   10 CONTINUE
+C
+C********************************************************************************
+C
+C
+      DO 1000 NBLCK=1,NBLOCKS
+C
+      IF(IFCHECK.GE.1) WRITE(6,*) ' SETTING MWALL BLOCK No ',NBLCK
+C
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+C
+C    SET MWALL = 0, CORRESPONDING T0 NO FLOW THROUGH THE BLOCK BOUNDARIES.
+C                   AS THE DEFAULT.
+C
+      DO 50 K=1,KM
+      DO 50 J=1,JM
+      MWALLI1(J,K,NBLCK) = 0
+      MWALLIM(J,K,NBLCK) = 0
+  50  CONTINUE
+C
+      DO 55 K=1,KM
+      DO 55 I=1,IM
+      MWALLJ1(I,K,NBLCK) = 0
+      MWALLJM(I,K,NBLCK) = 0
+  55  CONTINUE
+C
+      DO 60 J=1,JM
+      DO 60 I=1,IM
+      MWALLK1(I,J,NBLCK) = 0
+      MWALLKM(I,J,NBLCK) = 0
+  60  CONTINUE
+C
+C    "SPAREVAR"  is used to determine whether or not to smooth the patch
+C    and block boundaries. SPAREVAR = 0.0 means the point is not  smoothed.
+C
+      DO 65 K=1,KM
+      DO 65 J=1,JM
+      DO 65 I=1,IM
+      SPAREVAR(I,J,K,NBLCK) = 1.0
+   65 CONTINUE
+C
+C     TURN OFF THE GRID SMOOTHING ON THE BLOCK BOUNDARIES IF REQUIRED.
+C
+      IF(IFISMTH(NBLCK).EQ.0) THEN
+      DO 66 K=1,KM
+      DO 66 J=1,JM
+      SPAREVAR(1,J,K,NBLCK)  = 0.0
+      SPAREVAR(IM,J,K,NBLCK) = 0.0
+   66 CONTINUE
+      ENDIF
+C
+      IF(IFJSMTH(NBLCK).EQ.0) THEN
+      DO 67 K=1,KM
+      DO 67 I=1,IM
+      SPAREVAR(I,1,K,NBLCK)  = 0.0
+      SPAREVAR(I,JM,K,NBLCK) = 0.0
+   67 CONTINUE
+      ENDIF
+C
+      IF(IFKSMTH(NBLCK).EQ.0) THEN
+      DO 68 J=1,JM
+      DO 68 I=1,IM
+      SPAREVAR(I,J,1,NBLCK)  = 0.0
+      SPAREVAR(I,J,KM,NBLCK) = 0.0
+   68 CONTINUE
+      ENDIF
+C
+C***********************************************************************
+C
+C     NOW LOOP OVER ALL THE PATCHES ON THIS BLOCK.
+C
+      DO 100 NPTCH = 1,NPATCH(NBLCK)
+C
+C
+      PTYP     = PATCHTYPE(NPTCH,NBLCK)
+C
+C
+      IPS  = IPATCHS(NPTCH,NBLCK)
+      IPS  = IPATCHS(NPTCH,NBLCK)
+      IPE  = IPATCHE(NPTCH,NBLCK)
+      JPS  = JPATCHS(NPTCH,NBLCK)
+      JPE  = JPATCHE(NPTCH,NBLCK)
+      KPS  = KPATCHS(NPTCH,NBLCK)
+      KPE  = KPATCHE(NPTCH,NBLCK)
+C
+C
+C      IF A MATCHING PERIODIC BOUNDARY CHECK THE COMPATIBILITY OF PATCHES.
+C
+      IF(PTYP.EQ.'P'.OR.PTYP.EQ.'B') THEN
+C
+      NXBLCK   =  NEXT_BLOCK(NPTCH,NBLCK)
+      NXPTCH   =  NEXT_PATCH(NPTCH,NBLCK)
+      NXI      =  NEXT_I(NPTCH,NBLCK)
+      NXJ      =  NEXT_J(NPTCH,NBLCK)
+      NXK      =  NEXT_K(NPTCH,NBLCK)
+C
+      NXIS     =  IPATCHS(NXPTCH,NXBLCK)
+      NXIE     =  IPATCHE(NXPTCH,NXBLCK) 
+      NXJS     =  JPATCHS(NXPTCH,NXBLCK)
+      NXJE     =  JPATCHE(NXPTCH,NXBLCK)
+      NXKS     =  KPATCHS(NXPTCH,NXBLCK)
+      NXKE     =  KPATCHE(NXPTCH,NXBLCK)
+C
+C
+C   CHECK COMPATIBILITY OF THE EDGE ADJACENT TO THE 'I' EDGE OF THE PATCH.
+C
+C
+      IF(NXI.EQ.'+I'.OR.NXI.EQ.'+i'.OR.NXI.EQ.'-I'.OR.NXI.EQ.'-i')
+     &  THEN
+      IF((IPE-IPS).NE.(NXIE-NXIS)) THEN 
+      WRITE(6,*) 'NBLOCK = ',NBLCK,' NPATCH= ',NPTCH,
+     &           ' I:I LIMITS OF PATCH NOT COMPATIBLE.'
+      WRITE(6,*) ' IS,IE ', IPS,IPE,' NEXTIS,NEXTIE ', NXIS ,NXIE 
+      ENDIF
+      ENDIF
+C
+      IF(NXI.EQ.'+J'.OR.NXI.EQ.'+j'.OR.NXI.EQ.'-J'.OR.NXI.EQ.'-j')
+     &   THEN
+      IF((IPE-IPS).NE.(NXJE-NXJS)) THEN 
+      WRITE(6,*) 'NBLOCK = ',NBLCK,' NPATCH= ',NPTCH,
+     &           ' I:J LIMITS OF PATCH NOT COMPATIBLE.'
+      WRITE(6,*) ' IS,IE ', IPS,IPE,' NEXTJS,NEXTJE ', NXJS,NXJE 
+      ENDIF
+      ENDIF
+C
+      IF(NXI.EQ.'+K'.OR.NXI.EQ.'+k'.OR.NXI.EQ.'-K'.OR.NXI.EQ.'-k')
+     &   THEN
+      IF((IPE-IPS).NE.(NXKE-NXKS)) THEN 
+      WRITE(6,*) 'NBLOCK = ',NBLCK,' NPATCH= ',NPTCH,
+     &           ' I:K LIMITS OF PATCH NOT COMPATIBLE.'
+      WRITE(6,*) ' IS,IE ', IPS,IPE,' NEXTKS,NEXTKE ', NXKS,NXKE 
+      ENDIF
+      ENDIF
+C
+C   CHECK COMPATIBILITY OF THE EDGE ADJACENT TO THE 'J' EDGE OF THE PATCH.
+C
+      IF(NXJ.EQ.'+J'.OR.NXJ.EQ.'+j'.OR.NXJ.EQ.'-J'.OR.NXJ.EQ.'-j')
+     &   THEN
+      IF((JPE-JPS).NE.(NXJE-NXJS)) THEN 
+      WRITE(6,*) 'NBLOCK = ',NBLCK,' NPATCH= ',NPTCH,
+     &           ' J:J LIMITS OF PATCH NOT COMPATIBLE.'
+      WRITE(6,*) ' JS,JE ', JPS,JPE,' NEXTJS,NEXTJE ', NXJS ,NXJE 
+      ENDIF
+      ENDIF
+C
+      IF(NXJ.EQ.'+I'.OR.NXJ.EQ.'+i'.OR.NXJ.EQ.'-I'.OR.NXJ.EQ.'-i')
+     &   THEN
+      IF((JPE-JPS).NE.(NXIE-NXIS)) THEN 
+      WRITE(6,*) 'NBLOCK = ',NBLCK,' NPATCH= ',NPTCH,
+     &           ' J:I LIMITS OF PATCH NOT COMPATIBLE.'
+      WRITE(6,*) ' JS,JE ', JPS,JPE,' NEXTIS,NEXTIE ', NXIS,NXIE 
+      ENDIF
+      ENDIF
+C
+      IF(NXJ.EQ.'+K'.OR.NXJ.EQ.'+k'.OR.NXJ.EQ.'-K'.OR.NXJ.EQ.'-k')
+     &   THEN
+      IF((JPE-JPS).NE.(NXKE-NXKS)) THEN 
+      WRITE(6,*) 'NBLOCK = ',NBLCK,' NPATCH= ',NPTCH,
+     &           ' J:K LIMITS OF PATCH NOT COMPATIBLE.'
+      WRITE(6,*) ' JS,JE ', JPS,JPE,' NEXTKS,NEXTKE ', NXKS,NXKE 
+      ENDIF
+      ENDIF
+C
+C   CHECK COMPATIBILITY OF THE EDGE ADJACENT TO THE 'K' EDGE OF THE PATCH.
+C
+      IF(NXK.EQ.'+K'.OR.NXK.EQ.'+k'.OR.NXK.EQ.'-K'.OR.NXK.EQ.'-k')
+     &   THEN
+      IF((KPE-KPS).NE.(NXKE-NXKS)) THEN 
+      WRITE(6,*) 'NBLOCK = ',NBLCK,' NPATCH= ',NPTCH,
+     &           ' K:K LIMITS OF PATCH NOT COMPATIBLE.'
+      WRITE(6,*) ' KS,KE ', KPS,KPE,' NEXTKS,NEXTKE ', NXKS ,NXKE 
+      ENDIF
+      ENDIF
+C
+      IF(NXK.EQ.'+I'.OR.NXK.EQ.'+i'.OR.NXK.EQ.'-I'.OR.NXK.EQ.'-i')
+     &   THEN
+      IF((KPE-KPS).NE.(NXIE-NXIS)) THEN 
+      WRITE(6,*) 'NBLOCK = ',NBLCK,' NPATCH= ',NPTCH,
+     &           ' K:I LIMITS OF PATCH NOT COMPATIBLE.'
+      WRITE(6,*) ' KS,KE ', KPS,KPE,' NEXTIS,NEXTIE ', NXIS,NXIE 
+      ENDIF
+      ENDIF
+C
+      IF(NXK.EQ.'+J'.OR.NXK.EQ.'+j'.OR.NXK.EQ.'-J'.OR.NXK.EQ.'-j')
+     &   THEN
+      IF((KPE-KPS).NE.(NXJE-NXJS)) THEN 
+      WRITE(6,*) 'NBLOCK = ',NBLCK,' NPATCH= ',NPTCH,
+     &           ' K:J LIMITS OF PATCH NOT COMPATIBLE.'
+      WRITE(6,*) ' KS,KE ', KPS,KPE,' NEXTJS,NEXTJE ', NXJS,NXJE 
+      ENDIF
+      ENDIF
+C
+C    END OF CHECKING OF THE COMPATIBILITY OF THE PATCHES.
+C
+      ENDIF
+C
+C
+      IF(IFCHECK.GE.2) THEN
+C
+      WRITE(6,*)
+      WRITE(6,*) ' BLOCK No. ',NBLCK,' PATCH NUMBER  ', NPTCH
+      WRITE(6,*) ' PATCH TYPE  = ', PTYP
+      WRITE(6,*) ' PATCH START AND END POINTS'
+      WRITE(6,*) ' IPATCHS, IPATCHE ',IPATCHS(NPTCH,NBLCK),
+     &                                IPATCHE(NPTCH,NBLCK)
+      WRITE(6,*) ' JPATCHS, JPATCHE ',JPATCHS(NPTCH,NBLCK),
+     &                                JPATCHE(NPTCH,NBLCK)
+      WRITE(6,*) ' KPATCHS, KPATCHE ',KPATCHS(NPTCH,NBLCK),
+     &                                KPATCHE(NPTCH,NBLCK)
+      WRITE(6,*)
+C
+      ENDIF
+C
+C*******************************************************************************
+C
+C     NOW SET THE GRID SMOOTHING ON THE PATCHES
+C
+C
+C      SET SPAREVAR = 0.0 ON THE PATCH EDGES AND FACE SO THAT THEY ARE NOT
+C                         MOVED BY ANY SMOOTHING OF THE GRID.
+C
+C     IF "IFPSMOOTH" = 0. DO NOT SMOOTH THE 4 PATCH CORNER POINTS.
+C     IF "IFPSMOOTH" = 1. DO NOT SMOOTH THE PATCH EDGES.
+C     IF "IFPSMOOTH" = 2. DO NOT SMOOTH ANY POINTS IN THE PATCH OR ITS EDGES.
+C
+      IPSMTH   = IFPSMOOTH(NPTCH,NBLCK)
+C
+           KINT = 1
+           JINT = 1
+           IINT = 1
+      IF(IPSMTH.EQ.0) THEN
+           KINT = KPE - KPS 
+           JINT = JPE - JPS 
+           IINT = IPE - IPS
+      ENDIF
+C
+C
+C   FIRST SET THE  SMOOTHING OF AN "I" FACE PATCH.
+C
+      IF(IPS.EQ.IPE.AND.IPSMTH.LE.1) THEN
+           DO 70 K=KPS,KPE,KINT
+           SPAREVAR(IPS,JPS,K,NBLCK) = 0.0
+           SPAREVAR(IPS,JPE,K,NBLCK) = 0.0
+   70      CONTINUE
+           DO 71 J=JPS,JPE,JINT
+           SPAREVAR(IPS,J,KPS,NBLCK) = 0.0
+           SPAREVAR(IPS,J,KPE,NBLCK) = 0.0
+   71      CONTINUE
+      ENDIF
+C
+C
+C     NEXT SET THE SMOOTHING OF A "J" FACE PATCH.
+C
+      IF(JPS.EQ.JPE.AND.IPSMTH.LE.1) THEN
+           DO 72 K=KPS,KPE,KINT
+           SPAREVAR(IPS,JPS,K,NBLCK) = 0.0
+           SPAREVAR(IPE,JPS,K,NBLCK) = 0.0
+   72      CONTINUE
+           DO 73 I=IPS,IPE,IINT
+           SPAREVAR(I,JPS,KPS,NBLCK) = 0.0
+           SPAREVAR(I,JPS,KPE,NBLCK) = 0.0
+   73      CONTINUE
+      ENDIF
+C
+C
+C     NEXT SET THE SMOOTHING OF A "K" FACE PATCH.
+C
+      IF(KPS.EQ.KPE.AND.IPSMTH.LE.1) THEN    
+           DO 74 I=IPS,IPE,IINT
+           SPAREVAR(I,JPS,KPS,NBLCK) = 0.0
+           SPAREVAR(I,JPE,KPS,NBLCK) = 0.0
+   74      CONTINUE
+           DO 75 J=JPS,JPE,JINT
+           SPAREVAR(IPS,J,KPS,NBLCK) = 0.0
+           SPAREVAR(IPE,J,KPS,NBLCK) = 0.0
+   75      CONTINUE   
+      ENDIF
+C
+C     NOW SET NO SMOOTHING OVER THE WHOLE PATCH IF IPSMTH = 2
+C 
+      IF(IPSMTH.EQ.2) THEN
+           DO 80 K=KPS,KPE
+           DO 80 J=JPS,JPE 
+           DO 80 I=IPS,IPE
+           SPAREVAR(I,J,K,NBLCK) = 0.0
+   80 CONTINUE
+      ENDIF 
+C
+C************************************************************************
+C
+C         NOW SET "MWALL"  ON THE PATCH
+C
+C
+      IF(IPS.EQ.1.AND.IPE.EQ.1) THEN
+C
+C
+      DO 90 K = KPS,KPE-1
+      DO 90 J = JPS,JPE-1
+      IF(PTYP.EQ.'I'.OR.PTYP.EQ.'E'.OR.PTYP.EQ.'P'.OR.PTYP.EQ.'B'.
+     & OR.PTYP.EQ.'M'.OR.PTYP.EQ.'N'.OR.PTYP.EQ.'U'.OR.PTYP.EQ.'F')   
+     &                 MWALLI1(J,K,NBLCK) = 1
+      IF(PTYP.EQ.'S')  MWALLI1(J,K,NBLCK) = 0
+  90  CONTINUE
+C
+      ENDIF
+C
+      IF(IPS.EQ.IM.AND.IPE.EQ.IM) THEN
+C
+      DO 91 K = KPS,KPE-1
+      DO 91 J = JPS,JPE-1
+      IF(PTYP.EQ.'I'.OR.PTYP.EQ.'E'.OR.PTYP.EQ.'P'.OR.PTYP.EQ.'B'.
+     & OR.PTYP.EQ.'M'.OR.PTYP.EQ.'N'.OR.PTYP.EQ.'U'.OR.PTYP.EQ.'F')  
+     &                  MWALLIM(J,K,NBLCK) = 1
+      IF(PTYP.EQ.'S')   MWALLIM(J,K,NBLCK) = 0 
+  91  CONTINUE
+C
+      ENDIF
+C
+      IF(JPS.EQ.1.AND.JPE.EQ.1) THEN
+C
+      DO 92 K = KPS,KPE-1
+      DO 92 I = IPS,IPE-1
+      IF(PTYP.EQ.'I'.OR.PTYP.EQ.'E'.OR.PTYP.EQ.'P'.OR.PTYP.EQ.'B'.
+     & OR.PTYP.EQ.'N'.OR.PTYP.EQ.'F')    MWALLJ1(I,K,NBLCK) = 1
+      IF(PTYP.EQ.'S')     MWALLJ1(I,K,NBLCK) = 0
+  92  CONTINUE
+      ENDIF
+C
+      IF(JPS.EQ.JM.AND.JPE.EQ.JM) THEN
+C
+      DO 93 K = KPS,KPE-1
+      DO 93 I = IPS,IPE-1
+      IF(PTYP.EQ.'I'.OR.PTYP.EQ.'E'.OR.PTYP.EQ.'P'.OR.PTYP.EQ.'B'.
+     & OR.PTYP.EQ.'N'.OR.PTYP.EQ.'F')    MWALLJM(I,K,NBLCK) = 1
+      IF(PTYP.EQ.'S')     MWALLJM(I,K,NBLCK) = 0
+  93  CONTINUE
+C
+      ENDIF
+C
+      IF(KPS.EQ.1.AND.KPE.EQ.1) THEN
+C
+      DO 94 J = JPS,JPE-1
+      DO 94 I = IPS,IPE-1
+      IF(PTYP.EQ.'I'.OR.PTYP.EQ.'E'.OR.PTYP.EQ.'P'.OR.PTYP.EQ.'B'.
+     & OR.PTYP.EQ.'N'.OR.PTYP.EQ.'F')   MWALLK1(I,J,NBLCK) = 1
+      IF(PTYP.EQ.'S')    MWALLK1(I,K,NBLCK) = 0
+  94  CONTINUE
+C
+      ENDIF
+C
+      IF(KPS.EQ.KM.AND.KPE.EQ.KM) THEN
+C
+      DO 95 J = JPS,JPE-1
+      DO 95 I = IPS,IPE-1
+      IF(PTYP.EQ.'I'.OR.PTYP.EQ.'E'.OR.PTYP.EQ.'P'.OR.PTYP.EQ.'B'.
+     & OR.PTYP.EQ.'N'.OR.PTYP.EQ.'F')    MWALLKM(I,J,NBLCK) = 1
+      IF(PTYP.EQ.'S')     MWALLKM(I,J,NBLCK) = 0
+  95  CONTINUE
+C
+      ENDIF
+C
+C     END OF SETTING MWALL ON THIS PATCH
+C
+C***************************************************************************
+C
+C     END OF THE LOOP OVER THE PATCHES ON THIS BLOCK.
+C
+  100 CONTINUE
+C
+C*****************************************************************************
+C*****************************************************************************
+C     
+      IF(IFCHECK.GE.2) THEN
+C
+C    WRITE OUT THE WALL MASS FLUX FACTORS
+C
+      WRITE(6,*) ' BLOCK NUMBER',NBLCK,    ' MWALLI1 '
+      WRITE(6,*)
+      DO 120 J=JM-1,1,-1
+      WRITE(6,200) J,(MWALLI1(J,K,NBLCK),K=1,KM-1) 
+  120 CONTINUE
+      WRITE(6,*)  ' BLOCK NUMBER',NBLCK,   ' MWALLIM '
+      WRITE(6,*)
+      DO 121 J=JM-1,1,-1
+      WRITE(6,200) J,(MWALLIM(J,K,NBLCK),K=1,KM-1) 
+  121 CONTINUE
+C
+      WRITE(6,*)  ' BLOCK NUMBER',NBLCK,   ' MWALLJ1 '
+      WRITE(6,*)
+      DO 122 I= 1,IM-1
+      WRITE(6,201) I,(MWALLJ1(I,K,NBLCK),K=1,KM-1) 
+  122 CONTINUE
+      WRITE(6,*)   ' BLOCK NUMBER',NBLCK,  ' MWALLJM '
+      WRITE(6,*)
+      DO 123 I= 1,IM-1
+      WRITE(6,201) I,(MWALLJM(I,K,NBLCK),K=1,KM-1) 
+  123 CONTINUE
+C
+      WRITE(6,*) ' BLOCK NUMBER',NBLCK,    ' MWALLK1 '
+      WRITE(6,*)
+      DO 124 J= JM-1,1,-1
+      WRITE(6,200) J,(MWALLK1(I,J,NBLCK),I=1,IM-1) 
+  124 CONTINUE
+      WRITE(6,*)  ' BLOCK NUMBER',NBLCK,   ' MWALLKM '
+      WRITE(6,*)
+      DO 125 J= JM-1,1,-1
+      WRITE(6,200) J,(MWALLKM(I,J,NBLCK),I=1,IM-1) 
+  125 CONTINUE
+C
+  200 FORMAT(3HJ= ,I5,(T10,14I5))
+  201 FORMAT(3HI= ,I5,(T10,14I5))
+C
+      ENDIF
+C
+C
+      WRITE(6,*) 'ALL PATCHES SET, BLOCK NUMBER ', NBLCK
+      WRITE(6,*) '**************************************'
+C
+ 1000 CONTINUE
+C
+C
+           
+      WRITE(6,*) ' LEAVING SUBROUTINE SET PATCHES '
+C
+C
+      RETURN
+      END
+C
+C******************************************************************************
+C******************************************************************************
+C
+      SUBROUTINE GEN_GRID
+C
+      INCLUDE 'commall-29'
+C
+C
+       DIMENSION XINTP(NIBLADE),RINTP(NIBLADE),TINTP(NIBLADE),
+     & TKINTP(NIBLADE),QDIST(NIBLADE),SMERID(NIBLADE)
+C
+C
+      WRITE(6,*) ' ENTERING SUBROUTINE GEN_GRID. '
+C
+      DO 10000 NBLCK = 1,NBLOCKS
+C
+      WRITE(6,*) ' SETTING UP THE GRID COORDINATES, BLOCK NO ', NBLCK
+C
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+C
+C**************************************************************************
+C
+C    FIRST GENERATE THE GRID FOR INTYPE = 0 GRID INPUT. THIS USES 3D
+C    INTERPOLAATION IN SUBROUTINE GRIDINT.
+C
+      IF(INTYPE(NBLCK).EQ.0) THEN
+C
+      CALL GRIDINT(NBLCK)
+C
+      WRITE(6,*) ' CALLED GRIDINT.'
+C
+      ENDIF
+C
+C************************************************************************
+C**************************************************************************
+C
+C   NOW GENERATE THE GRID FOR INTYPE = 1 GRID INPUT.
+C
+C
+C   FIRST SET UP THE GRID ON THE I = 1 FACE FOR INTYPE = 1.
+C
+      IF(INTYPE(NBLCK).EQ.1) THEN
+C
+      DO 100 J=1,JM
+      FACJ   = FJ(J,NBLCK)
+      XLOW   = XI1J1K1(NBLCK)  + FACJ*(XI1JMK1(NBLCK)  - XI1J1K1(NBLCK))
+      XHIGH  = XI1J1KM(NBLCK)  + FACJ*(XI1JMKM(NBLCK)  - XI1J1KM(NBLCK))
+      RLOW   = RI1J1K1(NBLCK)  + FACJ*(RI1JMK1(NBLCK)  - RI1J1K1(NBLCK))
+      RHIGH  = RI1J1KM(NBLCK)  + FACJ*(RI1JMKM(NBLCK)  - RI1J1KM(NBLCK))
+      RTLOW  = RTI1J1K1(NBLCK) + FACJ*(RTI1JMK1(NBLCK) -RTI1J1K1(NBLCK))
+      RTHIGH = RTI1J1KM(NBLCK) + FACJ*(RTI1JMKM(NBLCK) -RTI1J1KM(NBLCK))
+C
+      DO 90 K=1,KM
+      FACK = FK(K,NBLCK)
+      X(1,J,K,NBLCK)  = XLOW  + FACK*(XHIGH-XLOW)
+      R(1,J,K,NBLCK)  = RLOW  + FACK*(RHIGH-RLOW)
+   90 RT(1,J,K,NBLCK) = RTLOW + FACK*(RTHIGH-RTLOW)
+  100 CONTINUE
+C
+C   NEXT SET UP THE GRID ON THE I = IM FACE FOR INTYPE = 1.
+C
+      DO 120 J=1,JM
+      FACJ   = FJ(J,NBLCK)
+      XLOW   = XIMJ1K1(NBLCK)  + FACJ*(XIMJMK1(NBLCK)  - XIMJ1K1(NBLCK))
+      XHIGH  = XIMJ1KM(NBLCK)  + FACJ*(XIMJMKM(NBLCK)  - XIMJ1KM(NBLCK))
+      RLOW   = RIMJ1K1(NBLCK)  + FACJ*(RIMJMK1(NBLCK)  - RIMJ1K1(NBLCK))
+      RHIGH  = RIMJ1KM(NBLCK)  + FACJ*(RIMJMKM(NBLCK)  - RIMJ1KM(NBLCK))
+      RTLOW  = RTIMJ1K1(NBLCK) + FACJ*(RTIMJMK1(NBLCK) -RTIMJ1K1(NBLCK))
+      RTHIGH = RTIMJ1KM(NBLCK) + FACJ*(RTIMJMKM(NBLCK) -RTIMJ1KM(NBLCK))
+C
+      DO 110 K=1,KM
+      FACK  = FK(K,NBLCK)
+      X(IM,J,K,NBLCK)  = XLOW  + FACK*(XHIGH-XLOW)
+      R(IM,J,K,NBLCK)  = RLOW  + FACK*(RHIGH-RLOW)
+  110 RT(IM,J,K,NBLCK) = RTLOW + FACK*(RTHIGH-RTLOW)
+  120 CONTINUE
+C
+C    NOW SET UP THE GRID OVER THE WHOLE VOLUME
+C
+      DO 200 I = 1,IM
+      FACI  = FI(I,NBLCK)
+      DO 200 J = 1,JM
+      DO 200 K = 1,KM
+      X(I,J,K,NBLCK)     =  X(1,J,K,NBLCK)  + 
+     &                      FACI*(X(IM,J,K,NBLCK)  - X(1,J,K,NBLCK))
+      R(I,J,K,NBLCK)     =  R(1,J,K,NBLCK)  +
+     &                      FACI*(R(IM,J,K,NBLCK)  - R(1,J,K,NBLCK))
+      RT(I,J,K,NBLCK)    =  RT(1,J,K,NBLCK) + 
+     &                      FACI*(RT(IM,J,K,NBLCK) - RT(1,J,K,NBLCK))
+  200 CONTINUE
+C
+      ENDIF
+C
+C    END OF INTYPE = 1 TYPE GRID GENERATION
+C
+C******************************************************************************
+C******************************************************************************
+C
+C    START THE INPUT = 2 TYPE GRID GENERATION
+C
+C    IN THIS CASE THE "I" GRID SPACING IS FIXED BY FS(I) IN THE GEOMETRY INPUT DATA
+C    AND FI(I,NBLCK) IS NOT USED. THE "J" AND "K" GRID SPACINGS ARE SET BY THE
+C    EXPANSION RATIOS  FJ(J,NBLCK) and FK(K,NBLCK).
+C
+      IF(INTYPE(NBLCK).EQ.2) THEN
+C
+      DO 130 I=1,IM
+      DO 130 J=1,JM
+      FACJ = FJ(J,NBLCK)
+      X(I,J,1,NBLCK)  = X(I,1,1,NBLCK) +
+     &                  FACJ*(X(I,JM,1,NBLCK)  -  X(I,1,1,NBLCK))
+      R(I,J,1,NBLCK)  = R(I,1,1,NBLCK) +
+     &                  FACJ*(R(I,JM,1,NBLCK)  -  R(I,1,1,NBLCK))
+      RT(I,J,1,NBLCK) = RT(I,1,1,NBLCK) +
+     &                  FACJ*(RT(I,JM,1,NBLCK) - RT(I,1,1,NBLCK))
+      X(I,J,KM,NBLCK) = X(I,1,KM,NBLCK) +
+     &                  FACJ*(X(I,JM,KM,NBLCK) - X(I,1,KM,NBLCK))
+      R(I,J,KM,NBLCK) = R(I,1,KM,NBLCK) +
+     &                  FACJ*(R(I,JM,KM,NBLCK) - R(I,1,KM,NBLCK))
+      RT(I,J,KM,NBLCK)= RT(I,1,KM,NBLCK) +
+     &                  FACJ*(RT(I,JM,KM,NBLCK)-RT(I,1,KM,NBLCK))
+  130 CONTINUE
+C
+      DO 140 I=1,IM
+      DO 140 J=1,JM
+      DO 140 K=1,KM
+      FACK = FK(K,NBLCK)
+      X(I,J,K,NBLCK)  = X(I,J,1,NBLCK) +
+     &                  FACK*(X(I,J,KM,NBLCK)-X(I,J,1,NBLCK)) 
+      R(I,J,K,NBLCK)  = R(I,J,1,NBLCK) +
+     &                  FACK*(R(I,J,KM,NBLCK)-R(I,J,1,NBLCK))
+      RT(I,J,K,NBLCK) = RT(I,J,1,NBLCK) +
+     &                  FACK*(RT(I,J,KM,NBLCK)-RT(I,J,1,NBLCK)) 
+  140 CONTINUE
+C      
+      ENDIF
+C
+C   END OF INTYPE = 2 GRID GENERATION.
+C
+C*****************************************************************************
+C*****************************************************************************
+C
+C   GENERATE THE GRID FOR A MULTIP TYPE INPUT.
+C 
+      IF(INTYPE(NBLCK).EQ.3.OR.INTYPE(NBLCK).EQ.5) THEN
+C
+C
+C     INTERPOLATE IN THE INPUT SECTIONS TO SET UP THE GRID
+C
+      NOSECNS = NOSECT(NBLCK)
+C
+C
+C     FIRST INTERPOLATE IN THE I (STREAMWISE) DIRECTION TO OBTAIN
+C     NEW GRID POINTS SPACED BY FI(I,NBLCK) IN THE MERIDIONAL DIRECTION
+C     ONLY IF "IF_IINT" IS NOT ZERO.
+C
+      IF(IF_IINT(NBLCK).EQ.0) GO TO 550
+C
+      IM_INPUT  = IM_IN(NBLCK)
+C
+      DO 560 N=1,NOSECNS
+      SMERID(1) = 0.0
+C
+      DO 510 I=2,IM_INPUT
+      XDIF = XINB(N,I,NBLCK)  - XINB(N,I-1,NBLCK)
+      RDIF = RINB(N,I,NBLCK)  - RINB(N,I-1,NBLCK)
+      SMERID(I) = SMERID(I-1) + SQRT(XDIF*XDIF + RDIF*RDIF)
+  510 CONTINUE
+C
+      DO 520 I=1,IM_INPUT
+      XINTP(I)  = XINB(N,I,NBLCK)
+      RINTP(I)  = RINB(N,I,NBLCK)
+      TINTP(I)  = RTINB(N,I,NBLCK)
+      TKINTP(I) = DRTINB(N,I,NBLCK)
+  520 CONTINUE
+C
+C
+C     MAKE SURE THAT THE LEADING AND TRAILING EDGE THICKNESSES ARE ZERO.
+C
+      IF(INTYPE(NBLCK).EQ.3) THEN
+      TINTP(IM_INPUT)  = TINTP(IM_INPUT) - 0.5*TKINTP(IM_INPUT)
+      TKINTP(IM_INPUT) = 0.0
+      TINTP(1)         = TINTP(1) - 0.5*TKINTP(1)
+      TKINTP(1)        = 0.0
+      ELSE
+      PITCH            = 2.*PI*RINTP(IM_INPUT)/NBLADES(NBLCK)
+      TKTEMP           = TINTP(IM_INPUT) - TKINTP(IM_INPUT) + PITCH
+      TINTP(IM_INPUT)  = TINTP(IM_INPUT) - 0.5*TKTEMP
+      TKINTP(IM_INPUT) = TKINTP(IM_INPUT)+ 0.5*TKTEMP
+      PITCH            = 2.*PI*RINTP(1)/NBLADES(NBLCK)
+      TKTEMP           = TINTP(1)  - TKINTP(1) + PITCH
+      TINTP(1)         = TINTP(1)  - 0.5*TKTEMP
+      TKINTP(1)        = TKINTP(1) + 0.5*TKTEMP
+      ENDIF
+C
+C     END OF LEADING AND TRAILING EDGE MODIFICATION.
+C
+
+      SDIFF = SMERID(IM_INPUT) - SMERID(1)
+      DO 530 I=1,IM
+      SARG = SMERID(1) + FI(I,NBLCK)*SDIFF
+      CALL INTP(IM_INPUT,SMERID,XINTP,SARG,XINB(N,I,NBLCK))     
+      CALL INTP(IM_INPUT,SMERID,RINTP,SARG,RINB(N,I,NBLCK)) 
+      CALL INTP(IM_INPUT,SMERID,TINTP,SARG,RTINB(N,I,NBLCK)) 
+      CALL INTP(IM_INPUT,SMERID,TKINTP,SARG,DRTINB(N,I,NBLCK))  
+  530 CONTINUE           
+C
+  560 CONTINUE
+C
+  550 CONTINUE
+C
+C
+C     NOW INTERPOLATE IN THE SPANWISE DIRECTION
+C
+C
+      DO 600 I=1,IM
+C
+      QDIST(1) = 0.0
+      DO 610 N = 2,NOSECNS
+      DX  = XINB(N,I,NBLCK) - XINB(N-1,I,NBLCK)
+      DR  = RINB(N,I,NBLCK) - RINB(N-1,I,NBLCK)
+      DQ  = SQRT(DX*DX + DR*DR)
+      QDIST(N) = QDIST(N-1) + DQ
+  610 CONTINUE
+C
+      DO 615 N=1,NOSECNS
+      XINTP(N)  = XINB(N,I,NBLCK)
+      RINTP(N)  = RINB(N,I,NBLCK)
+      TINTP(N)  = RTINB(N,I,NBLCK)
+      TKINTP(N) = DRTINB(N,I,NBLCK)
+  615 CONTINUE
+C
+      SPAN = QDIST(NOSECNS) - QDIST(1)
+C
+      DO 620 J=1,JM
+      ARG = FJ(J,NBLCK)*SPAN
+      CALL INTP(NOSECNS,QDIST,XINTP, ARG, X(I,J,1,NBLCK))
+      CALL INTP(NOSECNS,QDIST,RINTP, ARG, R(I,J,1,NBLCK))        
+      CALL INTP(NOSECNS,QDIST,TINTP, ARG,RT(I,J,1,NBLCK))
+      CALL INTP(NOSECNS,QDIST,TKINTP,ARG,RT(I,J,2,NBLCK))
+C
+      PITCH = 2.*PI*R(I,J,1,NBLCK)/NBLADES(NBLCK)
+C
+      IF(INTYPE(NBLCK).EQ.3)  GAP = PITCH - RT(I,J,2,NBLCK)
+C
+      IF(INTYPE(NBLCK).EQ.5)  GAP = RT(I,J,2,NBLCK) - RT(I,J,1,NBLCK)
+C            
+      DO 625 K = 2,KM
+      X(I,J,K,NBLCK)     = X(I,J,1,NBLCK)
+      R(I,J,K,NBLCK)     = R(I,J,1,NBLCK)
+      RT(I,J,K,NBLCK)    = RT(I,J,1,NBLCK) + FK(K,NBLCK)*GAP
+  625 CONTINUE
+C
+  620 CONTINUE
+C
+C
+  600 CONTINUE
+C
+      ENDIF
+C
+C    END OF INTYPE = 3 GRID GENERATION.
+C
+C************************************************************************************
+C************************************************************************************
+C
+C     SHIFT AND SCALE ALL THE GRID POINTS BY XMOVE,RMOVE,RTMOVE
+C
+      DO 1000 I=1,IM
+      DO 1000 J=1,JM
+      DO 1000 K=1,KM
+      X(I,J,K,NBLCK)  = SCALE(NBLCK)*X(I,J,K,NBLCK)  + XMOVE(NBLCK)
+      R(I,J,K,NBLCK)  = SCALE(NBLCK)*R(I,J,K,NBLCK)  + RMOVE(NBLCK)
+      RT(I,J,K,NBLCK) = SCALE(NBLCK)*RT(I,J,K,NBLCK) 
+     &                + R(I,J,K,NBLCK)/R(1,1,1,NBLCK)*RTMOVE(NBLCK)
+ 1000 CONTINUE
+C
+C***********************************************************************************
+C
+10000 CONTINUE
+C
+C***********************************************************************************
+C***********************************************************************************
+C
+C    ALL BLOCKS HAVE NOW BEEN GRIDDED BUT THERE IS NO CHECK THAT THE GRIDS
+C    ON ADJACENT PATCHES ARE COINCIDENT. NOW START TO MAKE THEM MATCH.
+C
+C
+C   CALL GRID_PATCH TO DISTORT THE GRID TO FIT THE PATCH BOUNDARIES READ IN AS 
+C   INPUT DATA IF MATCH_TYPE = 2. SET "IFDONE" TO ZERO.
+C
+C
+      DO 800    NBLCK = 1,NBLOCKS
+      DO 800    NP    = 1,NPATCH(NBLCK)
+      IFDONE(NP,NBLCK) = 0
+      IF(MATCH_TYPE(NP,NBLCK).EQ.2) THEN
+C
+      IF(IFCHECK.GE.1)
+     & WRITE(6,*)' CALLING GRID_PATCH, BLOCK No, PATCH No',NBLCK,NP
+C
+      CALL GRID_PATCH(NP,NBLCK)
+      ENDIF
+  800 CONTINUE
+C
+C
+C     MAKE SURE THAT THE TOTAL PATCH MOVEMENT PERFORMED BY MATCHPATCH
+C     IS THAT NEEDED TO MAKE THE GRID POINTS COINCIDENT.
+C
+      DO 790 NBLCK = 1,NBLOCKS
+      DO 790 NPTCH = 1,NPATCH(NBLCK)
+      NXBLCK  =  NEXT_BLOCK(NPTCH,NBLCK)
+      NXPTCH  =  NEXT_PATCH(NPTCH,NBLCK)
+      IF(IFDONE(NPTCH,NBLCK).EQ.0) IFDONE(NXPTCH,NXBLCK)  = 1
+      IF(IFDONE(NPTCH,NBLCK).EQ.1) FRACSHIFT(NPTCH,NBLCK) = 1.0
+  790 CONTINUE
+C
+C
+C     CALL "GET_PATCH" IF A NON-CONTIGUOS PATCH IS TO BE GENERATED BY MATCHING 
+C     TO AN EXISTING ADJACENT PATCH WHICH MAY HAVE A DIFFERENT NUMBER OF GRID POINTS.
+C     THIS MUST BE DONE AFTER THE ADJACENT PATCH HAS BEEN FIXED, HENCE AFTER
+C     CALLING  "GRID_PATCH" . "GRID_PATCH" MUST BE CALLED FOR THE CURRENT PATCH
+C     IMMEDIATELY AFTER CALLING "GET_PATCH"
+C
+C
+      DO 900 NBLCK = 1,NBLOCKS
+      DO 900    NP = 1,NPATCH(NBLCK)
+      IF(MATCH_TYPE(NP,NBLCK).EQ.3) THEN
+C
+      IF(IFCHECK.GE.1)
+     & WRITE(6,*)' CALLING GET_PATCH, BLOCK No, PATCH No.',NBLCK,NP
+C
+               CALL  GET_PATCH(NP,NBLCK)
+               CALL GRID_PATCH(NP,NBLCK)  
+      ENDIF
+  900 CONTINUE 
+C
+C   CALL "matchpatch" TO MAKE THE GRIDS COINCIDENT ON ADJACENT PATCHES.
+C   THIS MOVES THE ADJACENT  "NMATCH_ON"  and  "NMATCH_OFF"  GRID POINTS
+C   IN THE BLOCK BUT WITHOUT MOVING THE CURRENT PATCH BOUNDARIES. 
+C   IT MAY, HOWEVER, MOVE THE BOUNDARIES OF OTHER PATCHES ON THE SAME FACE
+C   INCLUDING ANY THAT HAVE BEEN PREVIOUSLY MATCHED WITH "matchpatch" SO IT
+C   IS SAFER TO CALL "matchpatch" SEVERAL (i.e. NLOOP) TIMES.
+
+C
+      WRITE(6,*)' STARTING TO CALL  MATCH_PATCH TO  MATCH PATCHES'
+C     
+      NLOOP = 2
+      DO 700 NL = 1,NLOOP
+      DO 710 NBLCK = 1,NBLOCKS
+      DO 720 NLEWP    = 1,NMATCH_LOOP(NBLCK) 
+C
+      IF(IFCHECK.GE.1) THEN 
+      WRITE(6,*)
+      WRITE(6,*) 'BLOCK No. ',NBLCK,' GRID MATCHING PASS No.',NLEWP 
+      WRITE(6,*) 
+      ENDIF
+C  
+      ICALL = 0
+      DO 720 NP    = 1,NPATCH(NBLCK) 
+      IF(MATCH_TYPE(NP,NBLCK).EQ.1)  CALL MATCH_PATCH(NP,ICALL,NBLCK)
+  720 CONTINUE
+  710 CONTINUE
+  700 CONTINUE
+C
+C     LOOP OVER ALL BLOCKS AGAIN CALLING GET_PATCH IN CASE ANY MATCHING PATCHES
+C     WERE MOVED BY MATCHING.
+
+C
+      DO 850 NBLCK = 1,NBLOCKS  
+      ICALL = 0
+      DO 850 NP    = 1,NPATCH(NBLCK) 
+      IF(MATCH_TYPE(NP,NBLCK).EQ.3) THEN
+               CALL  GET_PATCH(NP,NBLCK)
+               CALL GRID_PATCH(NP,NBLCK)  
+      ENDIF
+  850 CONTINUE
+C 
+C     NOW SMOOTH THE GRID. THIS SHOULD NOT CHANGE ANY OF THE PATCHES SINCE
+C     IFPSMOOTH HAS BEEN SET TO 2 ON ALL MATCHED PATCHES.
+C
+C
+      DO 880 NBLCK =1,NBLOCKS
+      DO 880 NSMTH = 1,NSMOOTH(NBLCK)
+      IF(IFCHECK.GE.1)
+     & WRITE(6,*) ' BLOCK NUMBER', NBLCK,' SMOOTHING PASS No.', NSMTH
+      CALL SMOOTH_GRID(NBLCK)
+  880 CONTINUE
+C 
+C
+C     THE GRID COORDINATES AND PATCHES ARE NOW ALL FIXED.
+C
+C****************************************************************************
+C****************************************************************************
+C
+C     WRITE OUT THE GRID COORDINATES IF IFCHECK = 2 OR MORE.
+C
+C
+      IF(IFCHECK.LT.2) GO TO 500
+C
+      DO 950 NBLCK =1,NBLOCKS
+C
+      WRITE(6,*)  ' X COORDINATE '
+      DO 201 K=1,KM
+      WRITE(6,*) 'X  AT  K = ', K, ' J ------------------> '
+      DO 201 I=1,IM
+      WRITE(6,111) I,(X(I,J,K,NBLCK),J=1,JM)
+ 201  CONTINUE
+      WRITE(6,*) ' RADIUS '
+      DO 202 K=1,KM
+      WRITE(6,*) 'R  AT  K = ', K, ' J ------------------> '
+      DO 202 I=1,IM
+      WRITE(6,111) I,(R(I,J,K,NBLCK),J=1,JM)
+ 202  CONTINUE
+      WRITE(6,*) ' RTHETA '
+      DO 203 K=1,KM
+      WRITE(6,*) 'RTHETA  AT  K = ', K, ' J ------------------> '
+      DO 203 I=1,IM
+      WRITE(6,111) I,(RT(I,J,K,NBLCK),J=1,JM)
+ 203  CONTINUE
+ 111  FORMAT(3HI= ,I5,(T10,7F10.3))
+C
+  950 CONTINUE
+C
+  500 CONTINUE
+C
+      WRITE(6,*) ' LEAVING SUBROUTINE GEN_GRID. '
+C
+C
+      RETURN
+      END
+C
+C******************************************************************************
+C******************************************************************************
+C
+      SUBROUTINE SET_INTERPFACE
+C
+      INCLUDE 'commall-29'
+C
+C      NOW SET UP THE POINTS TO BE USED FOR INTERPOLATION FOR NON-CONTIGUOUS
+C      PATCHES, PTYPE = 'N'
+C
+      NINTFACE = 0
+C
+      DO 1000 NBLCK=1,NBLOCKS
+C
+      DO  100 NPTCH = 1,NPATCH(NBLCK)
+C
+C
+      IF(PATCHTYPE(NPTCH,NBLCK).EQ.'N') THEN
+C
+      NINTFACE            = NINTFACE + 1
+      NBLKINT(NINTFACE)   = NBLCK
+      NPCHINT(NINTFACE)   = NPTCH
+C
+      IPS  = IPATCHS(NPTCH,NBLCK)
+      IPE  = IPATCHE(NPTCH,NBLCK)
+      JPS  = JPATCHS(NPTCH,NBLCK)
+      JPE  = JPATCHE(NPTCH,NBLCK)
+      KPS  = KPATCHS(NPTCH,NBLCK)
+      KPE  = KPATCHE(NPTCH,NBLCK)
+C
+      NXBLCK   =  NEXT_BLOCK(NPTCH,NBLCK)
+      NXPTCH   =  NEXT_PATCH(NPTCH,NBLCK)
+C
+      NXIS     =  IPATCHS(NXPTCH,NXBLCK)
+      NXIE     =  IPATCHE(NXPTCH,NXBLCK) 
+      NXJS     =  JPATCHS(NXPTCH,NXBLCK)
+      NXJE     =  JPATCHE(NXPTCH,NXBLCK)
+      NXKS     =  KPATCHS(NXPTCH,NXBLCK)
+      NXKE     =  KPATCHE(NXPTCH,NXBLCK)
+C
+      IF(IFCHECK.GE.1) THEN
+C
+      WRITE(6,*)
+      WRITE(6,776) NINTFACE
+  776 FORMAT('SETTING TABLE OF DISTANCES IN SET_INTERPFACE FOR NON-CONTI
+     &GUOUS FACE NUMBER',I4)
+      WRITE(6,*)
+      WRITE(6,777) NBLCK,IPS,IPE,JPS,JPE,KPS,KPE
+  777 FORMAT(' CURRENT BLOCK NUMBER, IPS,IPE,JPS,JPE,KPS,KPE',I10,6I5) 
+      WRITE(6,778) NXBLCK,NXIS,NXIE,NXJS,NXJE,NXKS,NXKE
+  778 FORMAT(' NEXT BLOCK No, NXIS,NXIE,NXJS,NXJE,NXKS,NXKE ',I10,6I5)
+C
+      ENDIF
+C
+      NPOINT = 0
+      DO 300 K = KPS,KPE
+      DO 300 J = JPS,JPE
+      DO 300 I = IPS,IPE
+      NPOINT   = NPOINT + 1
+      XPOINT   = X(I,J,K,NBLCK)
+      RPOINT   = R(I,J,K,NBLCK)
+      RTPOINT  = RT(I,J,K,NBLCK)
+
+      NNEXT = 0
+      DO 250 KN = NXKS,NXKE
+      DO 250 JN = NXJS,NXJE
+      DO 250 IN = NXIS,NXIE
+      NNEXT  = NNEXT + 1
+      XNEXT  = X(IN,JN,KN,NXBLCK)
+      RNEXT  = R(IN,JN,KN,NXBLCK)
+      RTNEXT = RT(IN,JN,KN,NXBLCK) 
+      DISTSQRD(NNEXT) = (XNEXT-XPOINT)*(XNEXT-XPOINT)
+     &                + (RNEXT-RPOINT)*(RNEXT-RPOINT) 
+     &                + (RTNEXT-RTPOINT)*(RTNEXT-RTPOINT) 
+      NORDER(NNEXT)   = NNEXT
+      INEXT(NNEXT)    = IN
+      JNEXT(NNEXT)    = JN
+      KNEXT(NNEXT)    = KN
+  250 CONTINUE
+C
+C
+C     CALL SORT TO ORDER THE POINTS ON THE ADJACENT PATCH IN TERMS OF THEIR
+C     DISTANCE FROM THE CURRENT POINT.
+C
+      CALL SORT(NNEXT,DISTSQRD,NORDER) 
+C
+C
+      DO 255 N=1,NPINTERP(NPTCH,NBLCK)
+      NEXTI(NINTFACE,NPOINT,N) = INEXT(NORDER(N))
+      NEXTJ(NINTFACE,NPOINT,N) = JNEXT(NORDER(N))
+      NEXTK(NINTFACE,NPOINT,N) = KNEXT(NORDER(N))
+  255 CONTINUE
+C  
+C
+  300 CONTINUE     
+C
+      IF(IFCHECK.GE.1) THEN
+      WRITE(6,*) ' INT_TYPE = ', INT_TYPE(NPTCH,NBLCK),
+     &           ' NPINTERP = ', NPINTERP(NPTCH,NBLCK) 
+      WRITE(6,*) 'DONE INTERPOLATED FACE No.',NINTFACE,'NUMBER OF INTERP
+     &OLATED GRID POINTS = ', NPOINT
+      ENDIF
+C
+C
+C     END OF NON-CONTIGUOUS PATCH SETUP.
+C
+      ENDIF
+C
+  100 CONTINUE
+C
+ 1000 CONTINUE
+C
+      RETURN
+      END
+C*********************************************************************************
+C*********************************************************************************
+C*********************************************************************************
+C
+      SUBROUTINE FIND_AREAS
+C
+      INCLUDE 'commall-29'
+C
+      DO 10000 NBLCK = 1,NBLOCKS
+C
+      IF(IFCHECK.EQ.1)  WRITE(6,*) ' IN FIND AREAS  BLOCK No ', NBLCK
+C
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+C
+C       CALCULATE THE CIRCUMFERENTIAL ANGLE OF ALL GRID POINTS
+C       AND SAVE IT TEMPORARILY AS  "STORE".
+C
+      DO 100 I=1,IM
+      DO 100 J=1,JM
+      DO 100 K=1,KM
+      STORE(I,J,K) = RT(I,J,K,NBLCK)/R(I,J,K,NBLCK)
+  100 CONTINUE
+C
+C
+C   EVALUATE THE AREAS OF THE CELL FACES. THE AREAS ARE INDEXED TO THE LOWEST
+C   VALUES OF I , J , K  ON THE FACE.
+C
+C    FIRST THE "I" FACES
+C
+      DO 110 I = 1,IM
+      DO 110 J = 1,JM - 1
+      DO 110 K = 1,KM - 1
+      THAVG  = 0.25*(STORE(I,J,K )    + STORE(I,J+1,K)
+     &             + STORE(I,J+1,K+1) + STORE(I,J,K+1))
+      XDIF1   =  X(I,J+1,K+1,NBLCK)  -  X(I,J,K,NBLCK)
+      RDIF1   =  R(I,J+1,K+1,NBLCK)  -  R(I,J,K,NBLCK)
+      RTDIF1  =  R(I,J+1,K+1,NBLCK)*(STORE(I,J+1,K+1) - THAVG)
+     &        -  R(I,J,K,NBLCK)*(STORE(I,J,K) - THAVG)
+      XDIF2   =  X(I,J,K+1,NBLCK)  -  X(I,J+1,K,NBLCK)
+      RDIF2   =  R(I,J,K+1,NBLCK)  -  R(I,J+1,K,NBLCK)
+      RTDIF2  =  R(I,J,K+1,NBLCK)*(STORE(I,J,K+1) - THAVG)
+     &        -  R(I,J+1,K,NBLCK)*(STORE(I,J+1,K) - THAVG)
+      AIX(I,J,K,NBLCK) = 0.5*(RDIF1*RTDIF2 - RDIF2*RTDIF1)
+      AIR(I,J,K,NBLCK) = 0.5*(XDIF2*RTDIF1 - XDIF1*RTDIF2)
+      AIT(I,J,K,NBLCK) = 0.5*(XDIF1*RDIF2  - XDIF2*RDIF1)
+      RAVG = 0.25*(R(I,J,K,NBLCK)     + R(I,J+1,K,NBLCK) 
+     &           + R(I,J+1,K+1,NBLCK) + R(I,J,K+1,NBLCK))
+      WRAIT(I,J,K,NBLCK) = WROTBLK(NBLCK)*RAVG*AIT(I,J,K,NBLCK)
+  110 CONTINUE
+C
+C    NEXT THE "J" FACES
+C
+      DO 210 J = 1,JM
+      DO 210 I=1,IM - 1
+      DO 210 K=1,KM - 1
+      THAVG  = 0.25*(STORE(I,J,K)     + STORE(I+1,J,K)
+     &             + STORE(I+1,J,K+1) + STORE(I,J,K+1))
+      XDIF1   =  X(I,J,K+1,NBLCK)  -  X(I+1,J,K,NBLCK)
+      RDIF1   =  R(I,J,K+1,NBLCK)  -  R(I+1,J,K,NBLCK)
+      RTDIF1  =  R(I,J,K+1,NBLCK)*(STORE(I,J,K+1) - THAVG)
+     &        -  R(I+1,J,K,NBLCK)*(STORE(I+1,J,K) - THAVG)
+      XDIF2   =  X(I+1,J,K+1,NBLCK)  -  X(I,J,K,NBLCK)
+      RDIF2   =  R(I+1,J,K+1,NBLCK)  -  R(I,J,K,NBLCK)
+      RTDIF2  =  R(I+1,J,K+1,NBLCK)*(STORE(I+1,J,K+1)-THAVG)
+     &        -  R(I,J,K,NBLCK)*(STORE(I,J,K) - THAVG)
+      AJX(I,J,K,NBLCK) = 0.5*(RDIF1*RTDIF2 - RDIF2*RTDIF1)
+      AJR(I,J,K,NBLCK) = 0.5*(XDIF2*RTDIF1 - XDIF1*RTDIF2)
+      AJT(I,J,K,NBLCK) = 0.5*(XDIF1*RDIF2  - XDIF2*RDIF1)
+      RAVG = 0.25*(R(I,J,K,NBLCK)     + R(I,J,K+1,NBLCK) 
+     &           + R(I+1,J,K+1,NBLCK) + R(I+1,J,K,NBLCK))
+      WRAJT(I,J,K,NBLCK) = WROTBLK(NBLCK)*RAVG*AJT(I,J,K,NBLCK)
+  210 CONTINUE
+C
+C    NEXT THE "K" FACES
+C
+      DO 220 K = 1,KM
+      DO 220 I=1,IM - 1
+      DO 220 J=1,JM - 1
+      THAVG  = 0.25*(STORE(I,J,K)     + STORE(I+1,J,K) 
+     &             + STORE(I+1,J+1,K) + STORE(I,J+1,K))
+      XDIF1   =  X(I+1,J+1,K,NBLCK)  -  X(I,J,K,NBLCK)
+      RDIF1   =  R(I+1,J+1,K,NBLCK)  -  R(I,J,K,NBLCK)
+      RTDIF1  =  R(I+1,J+1,K,NBLCK)*(STORE(I+1,J+1,K)-THAVG)
+     &        -  R(I,J,K,NBLCK)*(STORE(I,J,K) - THAVG)
+      XDIF2   =  X(I+1,J,K,NBLCK)  -  X(I,J+1,K,NBLCK)
+      RDIF2   =  R(I+1,J,K,NBLCK)  -  R(I,J+1,K,NBLCK)
+      RTDIF2  =  R(I+1,J,K,NBLCK)*(STORE(I+1,J,K) - THAVG)
+     &        -  R(I,J+1,K,NBLCK)*(STORE(I,J+1,K) - THAVG)
+      AKX(I,J,K,NBLCK) = -0.5*(RDIF1*RTDIF2 - RDIF2*RTDIF1)
+      AKR(I,J,K,NBLCK) = -0.5*(XDIF2*RTDIF1 - XDIF1*RTDIF2)
+      AKT(I,J,K,NBLCK) = -0.5*(XDIF1*RDIF2  - XDIF2*RDIF1)
+      RAVG = 0.25*(R(I,J,K,NBLCK)     + R(I,J+1,K,NBLCK) 
+     &           + R(I+1,J+1,K,NBLCK) + R(I+1,J,K,NBLCK))
+      WRAKT(I,J,K,NBLCK) = WROTBLK(NBLCK)*RAVG*AKT(I,J,K,NBLCK)
+  220 CONTINUE
+C
+C     CALCULATE THE VOLUMES OF THE ELEMENTS
+C
+      NNEG = 0
+      DO 300 I=1,IM-1
+      DO 300 J=1,JM-1
+      DO 300 K=1,KM-1
+      AREAKSQ = AKX(I,J,K,NBLCK)*AKX(I,J,K,NBLCK) +
+     &          AKR(I,J,K,NBLCK)*AKR(I,J,K,NBLCK) + 
+     &          AKT(I,J,K,NBLCK)*AKT(I,J,K,NBLCK)
+      AREAK   = SQRT(AREAKSQ)
+      XNORM   = AKX(I,J,K,NBLCK)/AREAK
+      RNORM   = AKR(I,J,K,NBLCK)/AREAK
+      TNORM   = AKT(I,J,K,NBLCK)/AREAK
+      DX1     = X(I,J,K+1,NBLCK)  - X(I,J,K,NBLCK)
+      DR1     = R(I,J,K+1,NBLCK)  - R(I,J,K,NBLCK)
+      DRT1    = RT(I,J,K+1,NBLCK) - RT(I,J,K,NBLCK)
+      HT1     = XNORM*DX1 + RNORM*DR1 + TNORM*DRT1
+      DX2     = X(I+1,J,K+1,NBLCK) - X(I+1,J,K,NBLCK)
+      DR2     = R(I+1,J,K+1,NBLCK) - R(I+1,J,K,NBLCK)
+      DRT2    = RT(I+1,J,K+1,NBLCK) - RT(I+1,J,K,NBLCK)
+      HT2     = XNORM*DX2 + RNORM*DR2 + TNORM*DRT2
+      DX3     =X(I+1,J+1,K+1,NBLCK) - X(I+1,J+1,K,NBLCK)
+      DR3     =R(I+1,J+1,K+1,NBLCK) - R(I+1,J+1,K,NBLCK)
+      DRT3    =RT(I+1,J+1,K+1,NBLCK) - RT(I+1,J+1,K,NBLCK)
+      HT3     = XNORM*DX3 + RNORM*DR3 + TNORM*DRT3
+      DX4     = X(I,J+1,K+1,NBLCK) - X(I,J+1,K,NBLCK)
+      DR4     = R(I,J+1,K+1,NBLCK) - R(I,J+1,K,NBLCK)
+      DRT4    = RT(I,J+1,K+1,NBLCK) - RT(I,J+1,K,NBLCK)
+      HT4     = XNORM*DX4 + RNORM*DR4 + TNORM*DRT4
+      VOL(I,J,K,NBLCK) = AREAK*0.25*(HT1+HT2+HT3+HT4)
+C
+      IF(VOL(I,J,K,NBLCK).LT.0.0) THEN
+      NNEG = NNEG + 1
+      IF(NNEG.LT.100.AND.IFCHECK.GE.1) THEN
+      WRITE(6,*)'BLOCK No.',NBLCK,' NEGATIVE VOLUME AT,I,J,K ',I,J,K
+      WRITE(6,*) ' AREAK = ', AREAK
+      WRITE(6,*) ' HT1,HT2,HT3,HT4', HT1,HT2,HT3,HT4
+      ENDIF
+      ENDIF
+C
+      AVGR    = .125*(R(I,J,K,NBLCK) + R(I,J+1,K,NBLCK)
+     &        + R(I,J+1,K+1,NBLCK)   + R(I,J,K+1,NBLCK)
+     &        + R(I+1,J,K,NBLCK)     + R(I+1,J+1,K,NBLCK)
+     &        +R(I+1,J+1,K+1,NBLCK) + R(I+1,J,K+1,NBLCK))
+      VOLOR(I,J,K,NBLCK) = 0.125*VOL(I,J,K,NBLCK)/AVGR
+C
+  300 CONTINUE
+C
+C
+C********************************************************************************
+C
+C     WRITE OUT THE AREAS OF THE FACES IF IFCHECK =3.
+C
+C
+      IF(IFCHECK.LT.3) GO TO 500
+C
+C     FIRST THE X FACE AREAS
+C
+      WRITE(6,*)  ' X AREA OF I FACE '
+      DO 201  I=1,IM
+      WRITE(6,*) 'AIX  AT  I = ', I
+      DO 201 J=1,JM-1
+      WRITE(6,111) J,(AIX(I,J,K,NBLCK),K=1,KM-1)
+ 201  CONTINUE
+      WRITE(6,*) ' RADIAL AREA OF I FACE'
+      DO 202 I=1,IM
+      WRITE(6,*) 'AIR  AT  I = ', I
+      DO 202 J=1,JM-1
+      WRITE(6,111) J,(AIR(I,J,K,NBLCK),K=1,KM-1)
+ 202  CONTINUE
+      WRITE(6,*) ' THETA AREA OF I FACE'
+      DO 203 I=1,IM
+      WRITE(6,*) 'AIT AT  I = ', I
+      DO 203 J=1,JM-1
+      WRITE(6,111) J,(AIT(I,J,K,NBLCK),K=1,KM-1)
+ 203  CONTINUE
+ 111  FORMAT(3HJ= ,I5,(T10,7F10.5))
+C
+      WRITE(6,*)  ' J FACE AREAS '
+C
+      WRITE(6,*)  ' X AREA OF J FACE '
+      DO 211  J=1,JM
+      WRITE(6,*) 'AJX  AT  J = ', J
+      DO 211 I=1,IM-1
+      WRITE(6,112) I,(AJX(I,J,K,NBLCK),K=1,KM-1)
+ 211  CONTINUE
+      WRITE(6,*) ' RADIAL AREA OF J FACE'
+      DO 212 J=1,JM
+      WRITE(6,*) 'AJR  AT  J = ', J
+      DO 212 I=1,IM-1
+      WRITE(6,112) I,(AJR(I,J,K,NBLCK),K=1,KM-1)
+ 212  CONTINUE
+      WRITE(6,*) ' THETA AREA OF J FACE'
+      DO 213 J=1,JM
+      WRITE(6,*) 'AJT AT  J = ', J
+      DO 213 I=1,IM-1
+      WRITE(6,112) I,(AJT(I,J,K,NBLCK),K=1,KM-1)
+ 213  CONTINUE
+ 112  FORMAT(3HI= ,I5,(T10,7F10.5))
+C
+      WRITE(6,*)  ' K FACE AREAS '
+C
+      WRITE(6,*)  ' X AREA OF K FACE '
+      DO 221  K=1,KM
+      WRITE(6,*) 'AKX  AT  K = ', K
+      DO 221 I=1,IM-1
+      WRITE(6,113) I,(AKX(I,J,K,NBLCK),J=1,JM-1)
+ 221  CONTINUE
+      WRITE(6,*) ' RADIAL AREA OF K FACE'
+      DO 222 K=1,KM
+      WRITE(6,*) 'AKR  AT  K = ', K
+      DO 222 I=1,IM-1
+      WRITE(6,113) I,(AKR(I,J,K,NBLCK),J=1,JM-1)
+ 222  CONTINUE
+      WRITE(6,*) ' THETA AREA OF K FACE'
+      DO 223 K=1,KM
+      WRITE(6,*) 'AKT AT  K = ', K
+      DO 223 I=1,IM-1
+      WRITE(6,113) I,(AKT(I,J,K,NBLCK),J=1,JM-1)
+ 223  CONTINUE
+ 113  FORMAT(3HI= ,I5,(T10,7F10.5))
+C
+C     WRITE OUT THE VOLUMES OF THE ELEMENTS
+C
+      DO 310 I=1,IM-1
+      WRITE(6,*) ' VOLUMES AT I = ',I
+      DO 311 K=1,KM-1
+  311 WRITE(6,312) K,(VOL(I,J,K,NBLCK),J=1,JM-1)
+  310 CONTINUE
+  312 FORMAT(3HK= ,I5,(T10,7F10.5))
+C
+  500 CONTINUE
+C
+C****************************************************************************
+C     CHECK FOR CLOSURE OF VOLUMES. WRITE A WARNING IF THEY DO NOT CLOSE.
+C****************************************************************************
+C
+C
+      NCLOSE = 0
+      DO 400 I=1,IM-1
+      DO 400 J=1,JM-1
+      DO 400 K=1,KM-1
+C
+      IF(IFCHECK.GE.3.AND.VOL(I,J,K,NBLCK).LT.0.0) THEN
+      
+      WRITE(6,*)' WARNING! BLOCK NUMBER. ',NBLCK
+      WRITE(6,*)' NEGATIVE VOLUME AT, I,J,K ',I,J,K
+      WRITE(6,*)' VOLUME =  ', VOL(I,J,K,NBLCK)
+      VOL(I,J,K,NBLCK) = -VOL(I,J,K,NBLCK)
+      ENDIF
+C
+      AREAI = SQRT(AIX(I,J,K,NBLCK)*AIX(I,J,K,NBLCK) +
+     &             AIR(I,J,K,NBLCK)*AIR(I,J,K,NBLCK) +
+     &             AIT(I,J,K,NBLCK)*AIT(I,J,K,NBLCK))
+      AREAJ = SQRT(AJX(I,J,K,NBLCK)*AJX(I,J,K,NBLCK) +
+     &             AJR(I,J,K,NBLCK)*AJR(I,J,K,NBLCK) +
+     &             AJT(I,J,K,NBLCK)*AJT(I,J,K,NBLCK))
+      AREAK = SQRT(AKX(I,J,K,NBLCK)*AKX(I,J,K,NBLCK) + 
+     &             AKR(I,J,K,NBLCK)*AKR(I,J,K,NBLCK) +
+     &             AKT(I,J,K,NBLCK)*AKT(I,J,K,NBLCK))
+C
+      AREF  = 0.001*AMAX1(AREAI,AREAJ,AREAK)
+C
+      RAVG = 0.125*(R(I,J,K,NBLCK) + R(I+1,J,K,NBLCK) + R(I,J+1,K,NBLCK)
+     &   + R(I+1,J+1,K,NBLCK)    + R(I,J,K+1,NBLCK) + R(I+1,J,K+1,NBLCK)
+     &   + R(I,J+1,K+1,NBLCK)    +R(I+1,J+1,K+1,NBLCK))
+      SUMX  = AIX(I,J,K,NBLCK)   - AIX(I+1,J,K,NBLCK) + AJX(I,J,K,NBLCK)
+     &    - AJX(I,J+1,K,NBLCK) + AKX(I,J,K,NBLCK)   - AKX(I,J,K+1,NBLCK)
+      SUMR  = AIR(I,J,K,NBLCK)   - AIR(I+1,J,K,NBLCK) + AJR(I,J,K,NBLCK)
+     &    - AJR(I,J+1,K,NBLCK) + AKR(I,J,K,NBLCK)   - AKR(I,J,K+1,NBLCK)
+      SUMR  = SUMR + VOL(I,J,K,NBLCK)/RAVG
+      SUMT  = AIT(I,J,K,NBLCK)   - AIT(I+1,J,K,NBLCK) + AJT(I,J,K,NBLCK) 
+     &    - AJT(I,J+1,K,NBLCK) + AKT(I,J,K,NBLCK)   - AKT(I,J,K+1,NBLCK)
+C
+      IF((IFCHECK.GE.3) .OR. (IFCHECK.GE.1.AND.NCLOSE.LT.100)) THEN
+      IF(ABS(SUMX).GT.AREF) WRITE(6,*)
+     & ' WARNING X AREA NOT WELL CLOSED, BLOCK NO',NBLCK,
+     &        ' I,J,K,SUMX ', I,J,K,SUMX/AREF
+      IF(ABS(SUMR).GT.AREF) WRITE(6,*)
+     & ' WARNING R AREA NOT WELL CLOSED, BLOCK NO',NBLCK,
+     &        ' I, J ,K, SUMR ', I,J,K,SUMR/AREF
+      IF(ABS(SUMT).GT.AREF) WRITE(6,*)
+     & ' WARNING T AREA NOT WELL CLOSED, BLOCK NO,',NBLCK,
+     &        ' I, J, K, SUMT ', I,J,K,SUMT/AREF
+      ENDIF
+C
+      IF(ABS(SUMX).GT.AREF.OR.ABS(SUMR).GT.AREF.OR.ABS(SUMT).GT.AREF)
+     &  NCLOSE = NCLOSE + 1
+C
+  400 CONTINUE
+C
+      IF(NNEG.EQ.0.AND.NCLOSE.EQ.0) THEN
+      WRITE(6,*) ' BLOCK NUMBER ',NBLCK,' VOLUMES CHECKED FOR CLOSURE 
+     & - ALL OK.'
+      ELSE
+      WRITE(6,*) ' WARNING !!!!!!!!!!!!'
+      WRITE(6,*) ' BLOCK NUMBER ',NBLCK,' HAS GRID PROBLEMS.'
+      WRITE(6,*)   NNEG,  ' NEGATIVE VOLUMES FOUND.'
+      WRITE(6,*)   NCLOSE,' NOT CLOSED VOLUMES FOUND.'
+      ENDIF
+C
+C
+10000 CONTINUE
+C
+      WRITE(6,*) ' LEAVING SUBROUTINE FIND_AREAS.'
+C
+C
+      RETURN
+      END
+C
+C*****************************************************************************
+C
+      SUBROUTINE INGUESS
+C
+      INCLUDE 'commall-29'
+C
+      CHARACTER*1   FTYPE
+C
+  102 FORMAT(A1)
+C
+C   MAKE AN INITIAL FLOW GUESS EVEN IF USING A RESTART FILE SO THAT THE
+C   CHANGES ARE INITIALISED TO ZERO AND THE LAMINAR VISCOSITY IS SET.
+C
+C
+C     MAKE INITIAL GUESS OF ALL FLOW VARIABLES IN THE "DO 10000" LOOP.
+C
+      DO 10000 NBLCK=1,NBLOCKS
+C
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+      IMID = IM/2
+      KMID = KM/2
+      JMID = JM/2
+C
+      ISETS = 1
+      ISETE = IM
+      JSETS = 1
+      JSETE = JM
+      KSETS = 1
+      KSETE = KM
+C
+C     READ IN THE INITIAL GUESS FOR THIS BLOCK.
+C     VGRIDIN  AND VGRIDOUT ARE THE relative VELOCITY COMPONENTS ALONG THE
+C     "FTYPE" GRID LINES. AT THE FIRST AND LAST GRID  "FTYPE"  GRID POINTS.
+C
+      READ(5,102) FTYPE
+      READ(5,*) VGRIDIN,  PSTATIN,  TSTAGIN
+      READ(5,*) VGRIDOUT, PSTATOUT, TSTAGOUT
+C
+      IF(IFCHECK.GE.1) THEN
+C
+      WRITE(6,*)
+      WRITE(6,*) 'BLOCK NUMBER', NBLCK
+      WRITE(6,*) 'INITIAL GUESS OF VGRIDIN,VGRIDOUT ',VGRIDIN,VGRIDOUT
+      WRITE(6,*) 'INITIAL GUESS OF PSTATIN,PSTATOUT ',PSTATIN,PSTATOUT
+      WRITE(6,*) 'INITIAL GUESS OF TSTAGIN,TSTAGOUT ',TSTAGIN,TSTAGOUT
+C
+      ENDIF
+C
+C      ALIGN THE FLOW WITH THE GRID LINES AS SPECIFIED BY "FTYPE" ASSUMING
+C      A LINEAR VARIATION OF RELATIVE VELOCITY, STATIC PRESSURE AND
+C      STAGNATION TEMPERATURE.
+C
+      SDIST    = 0.0
+      POREF    = 0.0
+      TOREF    = 0.0
+      ROREF    = 0.0
+C
+      IF(FTYPE.EQ.'I'.OR.FTYPE.EQ.'M') THEN
+C
+      DO 50 I=1,IM
+      IM1 = I-1
+      IP1 = I+1
+      IF(I.EQ.1)  IM1 = 1
+      IF(I.EQ.IM) IP1 = IM
+      FACI      = FLOAT(I-1)/FLOAT(IM-1)
+      VMGUESS   = VGRIDIN + FACI*(VGRIDOUT-VGRIDIN)
+C
+      DO 60 K=1,KM
+      DO 60 J=1,JM
+      DX        = X(IP1,J,K,NBLCK)  - X(IM1,J,K,NBLCK)
+      DR        = R(IP1,J,K,NBLCK)  - R(IM1,J,K,NBLCK)
+      DT        = RT(IP1,J,K,NBLCK) - RT(IM1,J,K,NBLCK)
+      DS        = SQRT(DX*DX + DR*DR + DT*DT)
+      IF(FTYPE.EQ.'M') DS = SQRT(DX*DX + DR*DR)
+      VXGUESS   = VMGUESS*DX/DS
+      VRGUESS   = VMGUESS*DR/DS
+      VTGUESS   = VMGUESS*DT/DS + WROTBLK(NBLCK)*R(I,J,K,NBLCK)
+      VABSSQ    = VXGUESS*VXGUESS + VRGUESS*VRGUESS + VTGUESS*VTGUESS
+      TSTAG     = TSTAGIN + FACI*(TSTAGOUT - TSTAGIN)
+      TSTAT     = TSTAG   - 0.5*VABSSQ/CP
+      PSTAT     = PSTATIN + FACI*(PSTATOUT - PSTATIN)
+      PSTAG     = PSTAT*(TSTAG/TSTAT)**RFGA
+      ROSTAT    = PSTAT/RGAS/TSTAT
+      ROALL(I,J,K,NBLCK)    = ROSTAT
+      ROVXALL(I,J,K,NBLCK)  = ROSTAT*VXGUESS
+      ROVRALL(I,J,K,NBLCK)  = ROSTAT*VRGUESS
+      RORVTALL(I,J,K,NBLCK) = ROSTAT*R(I,J,K,NBLCK)*VTGUESS
+      ROEALL(I,J,K,NBLCK)   = ROSTAT*(CV*TSTAT + 0.5*VABSSQ)
+      IF(J.EQ.JMID.AND.K.EQ.KMID)
+     &                  SDIST = SDIST + 0.5*SQRT(DX*DX + DR*DR + DT*DT)
+      IF(I.EQ.1.AND.J.EQ.JMID.AND.K.EQ.KMID) THEN
+      ROVIN = ROSTAT*SQRT(VABSSQ)
+      ENDIF
+      IF(I.EQ.IM.AND.J.EQ.JMID.AND.K.EQ.KMID) THEN
+      ROVOUT= ROSTAT*SQRT(VABSSQ)
+      ENDIF
+      POREF = POREF + PSTAG
+      TOREF = TOREF + TSTAG
+      ROREF = ROREF + ROSTAT
+   60 CONTINUE
+   50 CONTINUE
+C
+      SSET = SDIST
+      IF(ROVIN.GT.ROVOUT) THEN
+           ISETS = 1
+           ISETE = 1
+      ELSE
+           ISETS = IM
+           ISETE = IM
+      ENDIF
+C
+C
+      ENDIF
+C
+C
+      IF(FTYPE.EQ.'J') THEN
+C
+      DO 70 J=1,JM
+      FACJ = FLOAT(J-1)/FLOAT(JM-1)
+      VMGUESS   = VGRIDIN + FACJ*(VGRIDOUT-VGRIDIN)
+      JM1 = J-1
+      JP1 = J+1
+      IF(J.EQ.1)  JM1 = 1
+      IF(J.EQ.JM) JP1 = JM
+C
+      DO 80 K=1,KM
+      DO 80 I=1,IM
+      DX        = X(I,JP1,K,NBLCK)  - X(I,JM1,K,NBLCK)
+      DR        = R(I,JP1,K,NBLCK)  - R(I,JM1,K,NBLCK)
+      DT        = RT(I,JP1,K,NBLCK) - RT(I,JM1,K,NBLCK)
+      DS        = SQRT(DX*DX + DR*DR + DT*DT)
+      VXGUESS   = VMGUESS*DX/DS
+      VRGUESS   = VMGUESS*DR/DS
+      VTGUESS   = VMGUESS*DT/DS + WROTBLK(NBLCK)*R(I,J,K,NBLCK)
+      VABSSQ    = VXGUESS*VXGUESS + VRGUESS*VRGUESS + VTGUESS*VTGUESS
+      TSTAG     = TSTAGIN + FACJ*(TSTAGOUT - TSTAGIN)
+      TSTAT     = TSTAG   - 0.5*VABSSQ/CP
+      PSTAT     = PSTATIN + FACJ*(PSTATOUT - PSTATIN)
+      PSTAG     = PSTAT*(TSTAG/TSTAT)**RFGA
+      ROSTAT    = PSTAT/RGAS/TSTAT
+      ROALL(I,J,K,NBLCK)    = ROSTAT
+      ROVXALL(I,J,K,NBLCK)  = ROSTAT*VXGUESS
+      ROVRALL(I,J,K,NBLCK)  = ROSTAT*VRGUESS
+      RORVTALL(I,J,K,NBLCK) = ROSTAT*R(I,J,K,NBLCK)*VTGUESS
+      ROEALL(I,J,K,NBLCK)   = ROSTAT*(CV*TSTAT + 0.5*VABSSQ)
+      IF(I.EQ.IMID.AND.K.EQ.KMID) SDIST = SDIST + 0.5*DS
+      IF(I.EQ.IMID.AND.J.EQ.1.AND.K.EQ.KMID) THEN
+      ROVIN = ROSTAT*SQRT(VABSSQ)
+      ENDIF
+      IF(I.EQ.IMID.AND.J.EQ.JM.AND.K.EQ.KMID)THEN
+      ROVOUT= ROSTAT*SQRT(VABSSQ)
+      ENDIF
+      POREF = POREF + PSTAG
+      TOREF = TOREF + TSTAG
+      ROREF = ROREF + ROSTAT
+   80 CONTINUE
+   70 CONTINUE
+C
+C
+      SSET  = SDIST
+      IF(ROVIN.GT.ROVOUT) THEN
+           JSETS = 1
+           JSETE = 1
+      ELSE
+           JSETS = JM
+           JSETE = JM
+      ENDIF
+C
+C
+      ENDIF
+C
+C
+      IF(FTYPE.EQ.'K') THEN
+C
+      DO 90 K=1,KM
+      FACK = FLOAT(K-1)/FLOAT(KM-1)
+      VMGUESS   = VGRIDIN + FACK*(VGRIDOUT-VGRIDIN)
+      KM1 = K-1
+      KP1 = K+1
+      IF(K.EQ.1)  KM1 = 1
+      IF(K.EQ.KM) KP1 = KM
+C
+      DO 100 J=1,JM
+      DO 100 I=1,IM
+      DX        = X(I,J,KP1,NBLCK)  - X(I,J,KM1,NBLCK)
+      DR        = R(I,J,KP1,NBLCK)  - R(I,J,KM1,NBLCK)
+      DT        = RT(I,J,KP1,NBLCK) - RT(I,J,KM1,NBLCK)
+      DS        = SQRT(DX*DX + DR*DR + DT*DT)
+      VXGUESS   = VMGUESS*DX/DS
+      VRGUESS   = VMGUESS*DR/DS
+      VTGUESS   = VMGUESS*DT/DS + WROTBLK(NBLCK)*R(I,J,K,NBLCK)
+      VABSSQ    = VXGUESS*VXGUESS + VRGUESS*VRGUESS + VTGUESS*VTGUESS
+      TSTAG     = TSTAGIN + FACK*(TSTAGOUT - TSTAGIN)
+      TSTAT     = TSTAG   - 0.5*VABSSQ/CP
+      PSTAT     = PSTATIN + FACK*(PSTATOUT - PSTATIN)
+      PSTAG     = PSTAT*(TSTAG/TSTAT)**RFGA
+      ROSTAT    = PSTAT/RGAS/TSTAT
+      ROALL(I,J,K,NBLCK)    = ROSTAT
+      ROVXALL(I,J,K,NBLCK)  = ROSTAT*VXGUESS
+      ROVRALL(I,J,K,NBLCK)  = ROSTAT*VRGUESS
+      RORVTALL(I,J,K,NBLCK) = ROSTAT*R(I,J,K,NBLCK)*VTGUESS
+      ROEALL(I,J,K,NBLCK)   = ROSTAT*(CV*TSTAT + 0.5*VABSSQ)
+      IF(J.EQ.JMID.AND.I.EQ.IMID)  SDIST = SDIST + 0.5*DS
+      IF(I.EQ.IMID.AND.J.EQ.JMID.AND.K.EQ.1) THEN
+      ROVIN = ROSTAT*SQRT(VABSSQ)
+      ENDIF
+      IF(I.EQ.IMID.AND.J.EQ.JMID.AND.K.EQ.KM) THEN
+      ROVOUT= ROSTAT*SQRT(VABSSQ)
+      ENDIF
+      POREF = POREF + PSTAG
+      TOREF = TOREF + TSTAG
+      ROREF = ROREF + ROSTAT
+  100 CONTINUE
+   90 CONTINUE
+C
+C
+      SSET = SDIST
+      IF(ROVIN.GT.ROVOUT) THEN
+           KSETS = 1
+           KSETE = 1
+      ELSE
+           KSETS = KM
+           KSETE = KM
+      ENDIF
+C     
+      ENDIF
+C
+      TSTAG_REF(NBLCK)  = TOREF/(IM*JM*KM)
+      PSTAG_REF(NBLCK)  = POREF/(IM*JM*KM)
+      ROSTAT_REF(NBLCK) = ROREF/(IM*JM*KM)
+C
+C     SET THE INITIAL CHANGES TO ZERO
+C
+      DO 200 K=1,KM-1
+      DO 200 J=1,JM-1
+      DO 200 I=1,IM-1
+      DELROALL(I,J,K,NBLCK)    = 0.0
+      DELROEALL(I,J,K,NBLCK)   = 0.0
+      DELROVXALL(I,J,K,NBLCK)  = 0.0
+      DELRORVTALL(I,J,K,NBLCK) = 0.0
+      DELROVRALL(I,J,K,NBLCK)  = 0.0
+      STEP(I,J,K,NBLCK)        = 0.0
+  200 CONTINUE
+C
+C     SET THE GRID POINT TO BE USED TO CALCULATE THE LAMINAR VISCOSITY IF NBLCK = NETVIS
+C
+      IF(NBLCK.EQ.NSETVIS) THEN
+            SSETVIS  = SSET
+            ISETVISS = ISETS
+            ISETVISE = ISETE
+            JSETVISS = JSETS
+            JSETVISE = JSETE
+            KSETVISS = KSETS
+            KSETVISE = KSETE
+C
+      NSETPOINTS = 
+     & (ISETVISE+1-ISETVISS)*(JSETVISE+1-JSETVISS)*(KSETVISE+1-KSETVISS)
+C
+C           SET THE LAMINAR VISCOSITY
+C
+            ROVREF   = AMAX1(ROVIN,ROVOUT)
+	    IF(REYNO.GT.0.0)  THEN
+            VISLAM   = ROVREF*SDIST/REYNO
+            ELSE  
+            VISLAM = -REYNO
+            ENDIF
+C
+            WRITE(6,*)
+            WRITE(6,*) ' LAMINAR VISCOSITY IS SET IN BLOCK No. ',NBLCK
+            WRITE(6,*) ' INPUT VALUE OF REYNOLDS NUMBER = ', REYNO
+            WRITE(6,*) ' USING DISTANCE ', SDIST,' AND RO*V = ',ROVREF
+            WRITE(6,*) ' INITIAL VALUE OF LAMINAR VISCOSITY = ', VISLAM 
+            WRITE(6,*)
+      ENDIF
+C
+C
+C     END OF FLOW GUESS IN THIS BLOCK
+C
+10000 CONTINUE
+C
+C*******************************************************************************
+C      READ IN A RESTART FILE IF 'input' IS NOT ZERO.
+C      THIS OVERWRITES THE ABOVE INITIAL GUESS.
+C
+      IF(IFRESTART.NE.0) THEN
+C
+      OPEN(UNIT=8,FILE='flowout',FORM = 'unformatted')
+C
+      WRITE(6,*)
+      WRITE(6,*) ' READING IN THE RESTART FILE flowout FROM UNIT 8.'
+      WRITE(6,*)
+C
+      READ(8) NBLOCKS
+C
+      READ(8)  CP,GA
+C
+C      READ IN THE FLOW PROPERTIES FROM UNIT 8
+C
+      DO 300 NBLCK = 1,NBLOCKS
+C
+      READ(8) IM,JM,KM
+C
+
+      DO 30 I=1,IM 
+      DO 30 J=1,JM     
+      READ(8) (ROALL(I,J,K,NBLCK),   K=1,KM)
+      READ(8) (ROVXALL(I,J,K,NBLCK), K=1,KM)
+      READ(8) (ROVRALL(I,J,K,NBLCK), K=1,KM)
+      READ(8) (RORVTALL(I,J,K,NBLCK),K=1,KM) 
+      READ(8) (ROEALL(I,J,K,NBLCK),  K=1,KM)
+      READ(8) (SPAREVAR(I,J,K,NBLCK), K=1,KM)
+   30 CONTINUE
+C
+      IF(IF_DTS.EQ.1) READ(8) DUMMY,TIMTOT
+      IF(IF_DTS.NE.1) READ(8) DUMMY
+C
+  300 CONTINUE
+C
+C
+      ENDIF
+C
+      CLOSE(8)
+C
+C
+      WRITE(6,*) ' LEAVING SUBROUTINE INGUESS .'
+C
+C
+      RETURN
+      END
+C
+C*****************************************************************************
+C
+      SUBROUTINE SETSTEP(NBLCK)
+C
+      INCLUDE 'commall-29'
+C
+C_____DTS
+      IF (NBLCK.EQ.1) DTMIN=100000.
+C_____END DTS
+C
+      IMM1   = NI(NBLCK)-1
+      JMM1   = NJ(NBLCK)-1
+      KMM1   = NK(NBLCK)-1
+      NPOINTS= IMM1*JMM1*KMM1
+      POINTS = FLOAT(NPOINTS)
+      POINTSQ= POINTS*POINTS
+      DMIN   = MIN(IMM1,JMM1,KMM1)
+      NSAFE  = 0
+C
+      IF(IF_DTS.EQ.0)  THEN
+C
+C     SET TIME STEPS IF NO DTS
+C
+      SUMSTEP = 0.0
+      DO 90 K = 1,KMM1
+      DO 90 J = 1,JMM1
+      DO 90 I = 1,IMM1
+      AREAI =      AIX(I,J,K,NBLCK)*AIX(I,J,K,NBLCK) +
+     &             AIR(I,J,K,NBLCK)*AIR(I,J,K,NBLCK) +
+     &             AIT(I,J,K,NBLCK)*AIT(I,J,K,NBLCK)
+      AREAJ =      AJX(I,J,K,NBLCK)*AJX(I,J,K,NBLCK) +
+     &             AJR(I,J,K,NBLCK)*AJR(I,J,K,NBLCK) +
+     &             AJT(I,J,K,NBLCK)*AJT(I,J,K,NBLCK)
+      AREAK =      AKX(I,J,K,NBLCK)*AKX(I,J,K,NBLCK) +
+     &             AKR(I,J,K,NBLCK)*AKR(I,J,K,NBLCK) +
+     &             AKT(I,J,K,NBLCK)*AKT(I,J,K,NBLCK)
+      AMAX = SQRT(AMAX1(AREAI,AREAJ,AREAK))
+C
+      VVSMAX = AMAX1(STORE3(I,J,K),STORE3(I+1,J,K),STORE3(I+1,J+1,K)
+     &              ,STORE3(I,J+1,K),STORE3(I,J,K+1),STORE3(I+1,J,K+1) 
+     &              ,STORE3(I+1,J+1,K+1),STORE3(I,J+1,K+1))
+C
+      STEPNEW            = CFL/(VVSMAX*AMAX)
+C
+      STEP(I,J,K,NBLCK)  = 0.5*(STEP(I,J,K,NBLCK) + STEPNEW)
+      SUMSTEP = SUMSTEP + STEPNEW
+C
+   90 CONTINUE
+C
+      ENDIF
+C
+C
+C     SET TIME STEPS FOR DTS.
+C
+      IF(IF_DTS.EQ.1)  THEN
+C
+      SUMSTEP = 0.0
+      DO 100 K = 1,KMM1
+      DO 100 J = 1,JMM1
+      DO 100 I = 1,IMM1
+      AREAI =      AIX(I,J,K,NBLCK)*AIX(I,J,K,NBLCK) +
+     &             AIR(I,J,K,NBLCK)*AIR(I,J,K,NBLCK) +
+     &             AIT(I,J,K,NBLCK)*AIT(I,J,K,NBLCK)
+      AREAJ =      AJX(I,J,K,NBLCK)*AJX(I,J,K,NBLCK) +
+     &             AJR(I,J,K,NBLCK)*AJR(I,J,K,NBLCK) +
+     &             AJT(I,J,K,NBLCK)*AJT(I,J,K,NBLCK)
+      AREAK =      AKX(I,J,K,NBLCK)*AKX(I,J,K,NBLCK) +
+     &             AKR(I,J,K,NBLCK)*AKR(I,J,K,NBLCK) +
+     &             AKT(I,J,K,NBLCK)*AKT(I,J,K,NBLCK)
+      AMAX = SQRT(AMAX1(AREAI,AREAJ,AREAK))
+C
+      VVSMAX = AMAX1(STORE3(I,J,K),STORE3(I+1,J,K),STORE3(I+1,J+1,K)
+     &      ,STORE3(I,J+1,K),STORE3(I,J,K+1),STORE3(I+1,J,K+1) 
+     &      ,STORE3(I+1,J+1,K+1),STORE3(I,J+1,K+1))
+C
+      STEPNEW            = CFL/(VVSMAX*AMAX)
+C
+      STEPLIM            = FACSAFE*TRU_STEP/VOL(I,J,K,NBLCK)
+C
+      IF(STEPNEW.GT.STEPLIM) THEN
+            STEPNEW = STEPLIM
+            NSAFE = NSAFE + 1
+      ENDIF
+C
+      STEP(I,J,K,NBLCK)  = 0.5*(STEP(I,J,K,NBLCK) + STEPNEW)
+      SUMSTEP = SUMSTEP + STEPNEW
+C
+      DELT = STEP(I,J,K,NBLCK)*VOL(I,J,K,NBLCK)
+      IF (DELT.LT.DTMIN) DTMIN = DELT
+C
+  100 CONTINUE
+C
+      ENDIF
+C
+C
+C     SET THE SUPERBLOCK TIME STEPS
+C
+      SUPERSTEP(NBLCK) = SUPERFAC*DMIN*SUMSTEP/POINTSQ
+C
+C
+C      WRITE OUT HOW MANY CELLS ARE AFFECTED BY FACSAFE
+C
+      IF(IF_DTS.EQ.1.AND.NSTEP.EQ.1) THEN
+C
+      IF(NBLCK.EQ.1) WRITE(6,99) FACSAFE
+   99 FORMAT('THE EXPLICIT TIME STEP IS LIMITED TO ',F5.3,' OF THE TRUE
+     &TIME STEP IN THE FOLLOWING NUMBERS OF CELLS')
+C
+      FRACSAFE = NSAFE/FLOAT(NPOINTS)
+      WRITE(6,110) NBLCK,FACSAFE,NPOINTS,NSAFE,FRACSAFE
+  110 FORMAT(' BLOCK No.',I3,' FACSAFE = ',F5.3,' NPOINTS= ',I7,
+     &       ' NSAFE= ',I7,' FRACTION AFFECTED BY FACSAFE = ',F5.3)
+C
+      ENDIF
+C
+C
+C
+      RETURN
+      END
+C
+C*****************************************************************************
+C
+      SUBROUTINE SET_FLUX
+C
+      INCLUDE 'commall-29'
+C
+C
+      COMMON/BKSEC/
+     & RO(NIM,NJM,NKM),ROVX(NIM,NJM,NKM),ROVT(NIM,NJM,NKM),
+     & ROVR(NIM,NJM,NKM),ROE(NIM,NJM,NKM),HO(NIM,NJM,NKM),
+     & RORVT(NIM,NJM,NKM),VX(NIM,NJM,NKM),VT(NIM,NJM,NKM),
+     & VR(NIM,NJM,NKM),WT(NIM,NJM,NKM),ROWT(NIM,NJM,NKM),
+     & P(NIM,NJM,NKM),TSTATIC(NIM,NJM,NKM)
+C
+      COMMON/BKDELSEC/
+     & DELRO(NIM,NJM,NKM),DELROE(NIM,NJM,NKM),DELROVX(NIM,NJM,NKM),
+     & DELROVR(NIM,NJM,NKM),DELRORVT(NIM,NJM,NKM)
+C
+      DIMENSION FGRP(IMDT,JMDT,KMDT)
+C
+C
+      FLOWIN   = 0.0
+      FLOWOUT  = 0.0
+      HOAVGIN  = 0.0
+      HOAVGOUT = 0.0
+      POAVGIN  = 0.0
+      POAVGOUT = 0.0
+C
+      DO 10000 NBLCK = 1,NBLOCKS
+C
+      IM   = NI(NBLCK)
+      JM   = NJ(NBLCK)
+      KM   = NK(NBLCK)
+      IMM1 = IM-1
+      JMM1 = JM-1
+      KMM1 = KM-1
+      IMJMKM = (IM-2)*(JM-2)*(KM-2)
+C
+C      CHANGE FROM GLOBAL STORAGE TO SINGLE BLOCK STORAGE
+C
+      SUM = 0.0
+      DO 100 K=1,KM
+      DO 100 J=1,JM
+      DO 100 I=1,IM
+      RONOW          = ROALL(I,J,K,NBLCK)
+      IF(RONOW.LT.0.2*ROSTAT_REF(NBLCK)) RONOW = 0.2*ROSTAT_REF(NBLCK)
+      RO(I,J,K)      = RONOW
+      ROVX(I,J,K)    = ROVXALL(I,J,K,NBLCK)
+      ROVR(I,J,K)    = ROVRALL(I,J,K,NBLCK)
+      RORVT(I,J,K)   = RORVTALL(I,J,K,NBLCK)
+      ROE(I,J,K)     = ROEALL(I,J,K,NBLCK)
+      VX(I,J,K)      = ROVX(I,J,K)/RONOW
+      VR(I,J,K)      = ROVR(I,J,K)/RONOW
+      RBLK(I,J,K)    = R(I,J,K,NBLCK)
+      ROVT(I,J,K)    = RORVT(I,J,K)/RBLK(I,J,K)
+      VT(I,J,K)      = ROVT(I,J,K)/RONOW
+      WT(I,J,K)      = VT(I,J,K) - WROTBLK(NBLCK)*RBLK(I,J,K)
+      ROWT(I,J,K)    = RONOW*WT(I,J,K)
+      VMSQ           = VX(I,J,K)*VX(I,J,K) + VR(I,J,K)*VR(I,J,K)
+      EKE            = 0.5*(VMSQ  + VT(I,J,K)*VT(I,J,K))
+      EKEREL         = VMSQ  + WT(I,J,K)*WT(I,J,K)
+      TSTAT          = (ROE(I,J,K)/RONOW - EKE)/CV
+      TSTAG          = TSTAT  + EKE/CP
+      IF(TSTAG.LT.0.2*TSTAG_REF(NBLCK)) TSTAG = 0.2*TSTAG_REF(NBLCK)
+      IF(TSTAT.LT.0.1*TSTAG)        TSTAT = 0.1*TSTAG
+      HO(I,J,K)      = CP*TSTAG  
+      P(I,J,K)       = RONOW*RGAS*TSTAT
+      TSTATIC(I,J,K) = TSTAT
+C      STORE2(I,J,K)  = P(I,J,K)*(TSTAG/TSTAT)**RFGA
+C      STORE2(I,J,K)  = TSTAG
+      STORE3(I,J,K)  = SQRT(EKEREL) + SQRT(GAMR*TSTAT)
+C      STORE4(I,J,K)  = EKE
+      SUM            = SUM + RONOW*RONOW*EKE
+  100 CONTINUE
+C
+C
+      DO 101 K=1,KMM1
+      DO 101 J=1,JMM1
+      DO 101 I=1,IMM1
+      DELRO(I,J,K)   = DELROALL(I,J,K,NBLCK)
+      DELROE(I,J,K)  = DELROEALL(I,J,K,NBLCK)
+      DELROVX(I,J,K) = DELROVXALL(I,J,K,NBLCK)
+      DELROVR(I,J,K) = DELROVRALL(I,J,K,NBLCK)
+      DELRORVT(I,J,K)= DELRORVTALL(I,J,K,NBLCK)
+  101 CONTINUE
+C
+C
+C
+      RVREF     = SQRT(2.*SUM/(IM*JM*KM))
+      FAC_RVREF = 100./RVREF
+C
+C
+C     THE EXIT BOUNDARY CONDITIONS ARE NOW APPLIED.
+C       
+      CALL EXBCONDS(NBLCK,IM,JM,KM,IMM1,JMM1,KMM1)
+C
+C
+C
+C     CALL SUBROUTINE "set_visforce" TO SET THE VISCOUS TERMS EVERY NLOS STEPS.
+C     THIS SETS  THE VISCOUS FORCES  XFORCE, TFORCE and RFORCE
+C     acting on each block.
+C
+      IF(NSTEP.EQ.1)  CALL SET_VISFORCE(NBLCK)
+      IF(ILOS.NE.0.AND.MOD(NSTEP,NLOS).EQ.0) CALL SET_VISFORCE(NBLCK)
+C
+C     CALCULATE THE AVERAGE PRESSURES FOR USE IN THE FLUX TERMS
+C     NOTE THESE ARE 4 x THE TRUE AVERAGE.
+C
+      DO 111 K=1,KMM1
+      DO 111 J=1,JMM1
+      DO 111 I=1,IM
+      AVGPI(I,J,K)  =  P(I,J,K)+ P(I,J+1,K)+ P(I,J+1,K+1)+ P(I,J,K+1)
+  111 CONTINUE
+C
+      DO 222 K=1,KMM1
+      DO 222 J=1,JM
+      DO 222 I=1,IMM1
+      AVGPJ(I,J,K) =  P(I,J,K)+ P(I,J,K+1)+ P(I+1,J,K+1)+ P(I+1,J,K)
+  222 CONTINUE
+C
+      DO 333 K=1,KM
+      DO 333 J=1,JMM1
+      DO 333 I=1,IMM1
+      AVGPK(I,J,K)  =  P(I,J,K)+ P(I,J+1,K)+ P(I+1,J+1,K)+ P(I+1,J,K)
+  333 CONTINUE
+C
+C     CALCULATE THE PRESSURE LIFT AND DRAG.
+C
+      IF(NBLCK.EQ.1) THEN
+           PDRAG = 0.0
+           PLIFT = 0.0
+           DO J=1,JMM1
+           DO I=1,IMM1
+                PDRAG  = PDRAG + 0.25*AVGPK(I,J,KM)*AKX(I,J,KM,1)
+                PLIFT  = PLIFT + 0.25*AVGPK(I,J,KM)*AKT(I,J,KM,1)
+           END DO
+           END DO
+      ENDIF
+C
+      IF(NBLCK.EQ.2) THEN
+           DO J=1,JMM1
+           DO I=1,IMM1
+                PDRAG  = PDRAG - 0.25*AVGPK(I,J,1)*AKX(I,J,1,2)
+                PLIFT  = PLIFT - 0.25*AVGPK(I,J,1)*AKT(I,J,1,2)
+           END DO
+           END DO
+      ENDIF
+C
+C
+
+      
+C
+C     CALL SETSTEP TO UPDATE THE TIME STEP EVERY NSTEPUP STEPS
+C
+      IF(NSTEP.EQ.1)              CALL SETSTEP(NBLCK)
+      IF(MOD(NSTEP,NSTEPUP).EQ.0) CALL SETSTEP(NBLCK)
+C
+C
+C      SET THE MASS FLUXES
+C
+      DO 200 K=1,KMM1
+      DO 200 J=1,JM
+      DO 200 I=1,IMM1
+      AVRVX = ROVX(I,J,K)+ROVX(I,J,K+1)+ROVX(I+1,J,K+1)+ROVX(I+1,J,K)
+      AVRVR = ROVR(I,J,K)+ROVR(I,J,K+1)+ROVR(I+1,J,K+1)+ROVR(I+1,J,K)
+      AVRWT = ROWT(I,J,K)+ROWT(I,J,K+1)+ROWT(I+1,J,K+1)+ROWT(I+1,J,K)
+      FJMAS(I,J,K) = 0.25*(AJX(I,J,K,NBLCK)*AVRVX +
+     &               AJR(I,J,K,NBLCK)*AVRVR + AJT(I,J,K,NBLCK)*AVRWT)
+      FLUXJ(I,J,K)   = FJMAS(I,J,K)
+      SOURCE(I,J,K)  = 0.0
+  200 CONTINUE
+C
+      DO 210 K=1,KMM1
+      DO 210 I=1,IMM1
+      FJMAS(I,1,K)  = FJMAS(I,1,K)*MWALLJ1(I,K,NBLCK)
+      FJMAS(I,JM,K) = FJMAS(I,JM,K)*MWALLJM(I,K,NBLCK)
+      FLUXJ(I,1,K)  = FJMAS(I,1,K)
+      FLUXJ(I,JM,K) = FJMAS(I,JM,K)
+  210 CONTINUE
+C
+      DO 220 K=1,KMM1
+      DO 220 J=1,JMM1
+      DO 220 I=1,IM
+      AVRVX  = ROVX(I,J,K)+ROVX(I,J+1,K)+ROVX(I,J+1,K+1)+ROVX(I,J,K+1)
+      AVRVR  = ROVR(I,J,K)+ROVR(I,J+1,K)+ROVR(I,J+1,K+1)+ROVR(I,J,K+1)
+      AVRWT  = ROWT(I,J,K)+ROWT(I,J+1,K)+ROWT(I,J+1,K+1)+ROWT(I,J,K+1)
+      AVROVT = ROVT(I,J,K)+ROVT(I,J+1,K)+ROVT(I,J+1,K+1)+ROVT(I,J,K+1)
+      STORE1(I,J,K) = AVROVT
+      FIMAS(I,J,K)  = 0.25*(AIX(I,J,K,NBLCK)*AVRVX +
+     &                AIR(I,J,K,NBLCK)*AVRVR + AIT(I,J,K,NBLCK)*AVRWT)
+      FLUXI(I,J,K)  = FIMAS(I,J,K)
+  220 CONTINUE
+C
+      DO 230 K=1,KMM1
+      DO 230 J=1,JMM1
+      FIMAS(1,J,K)  = FIMAS(1,J,K)*MWALLI1(J,K,NBLCK)
+      FIMAS(IM,J,K) = FIMAS(IM,J,K)*MWALLIM(J,K,NBLCK)
+      FLUXI(1,J,K)  = FIMAS(1,J,K)
+      FLUXI(IM,J,K) = FIMAS(IM,J,K)
+  230 CONTINUE
+C
+      DO 240 K=1,KM
+      DO 240 J=1,JMM1
+      DO 240 I=1,IMM1
+      AVRVX = ROVX(I,J,K)+ROVX(I,J+1,K)+ROVX(I+1,J+1,K)+ROVX(I+1,J,K)
+      AVRVR = ROVR(I,J,K)+ROVR(I,J+1,K)+ROVR(I+1,J+1,K)+ROVR(I+1,J,K)
+      AVRWT = ROWT(I,J,K)+ROWT(I,J+1,K)+ROWT(I+1,J+1,K)+ROWT(I+1,J,K)
+      FKMAS(I,J,K) = 0.25*(AKX(I,J,K,NBLCK)*AVRVX+AKR(I,J,K,NBLCK)*AVRVR
+     &             +       AKT(I,J,K,NBLCK)*AVRWT)
+      FLUXK(I,J,K) = FKMAS(I,J,K)
+  240 CONTINUE
+C
+      DO 250 J=1,JMM1
+      DO 250 I=1,IMM1
+      FKMAS(I,J,1)  = FKMAS(I,J,1)*MWALLK1(I,J,NBLCK)
+      FKMAS(I,J,KM) = FKMAS(I,J,KM)*MWALLKM(I,J,NBLCK)
+      FLUXK(I,J,1)  = FKMAS(I,J,1)
+      FLUXK(I,J,KM) = FKMAS(I,J,KM)
+  250 CONTINUE
+C
+C
+C
+C     CALL  'SUMAS'  TO FIND THE INLET AND OUTLET MASS FLOWS.
+C
+      IF(MOD(NSTEP,25).EQ.0.OR.(NBTSTEP.GT.1.AND.NSTEP.EQ.1))
+     &                CALL SUMAS(NBLCK,FLOWIN,FLOWOUT,HOAVGIN,
+     &                HOAVGOUT,POAVGIN,POAVGOUT)
+C
+C
+C      CALL FLOWCHECK TO WRITE OUT THE FLOW BALANCE ON THE LAST TIME STEP
+C
+      IF(MOD(NSTEP,10).EQ.0.AND.IFSTOP.GE.1) CALL FLOWCHECK(NBLCK)
+      IF(MOD(NSTEP,200).EQ.0)                CALL FLOWCHECK(NBLCK)
+      IF(NSTEP.EQ.NSTEPS)                    CALL FLOWCHECK(NBLCK)
+C
+C
+C_____DTS
+C     If DTS, retrieve globally stored DTS variables:
+C
+      IF (IF_DTS.EQ.1) THEN
+         DO 255 K=1, KMM1
+         DO 255 J=1, JMM1
+         DO 255 I=1, IMM1
+         FGRP(I,J,K) = ROGRPALL(I,J,K,NBLCK)
+ 255     CONTINUE
+      END IF
+C_____ END  DTS
+C
+C     CALL SUMFLUX TO UPDATE THE DENSITY
+C
+C
+      IF (IF_DTS.NE.1) CALL SUMFLUX(NBLCK,RO,DELRO)
+      IF (IF_DTS.EQ.1) CALL SUMFLUX_DTS(NBLCK,RO,DELRO,FGRP)
+C
+C
+C    SET THE FLUXES OF ENERGY
+C
+      DO 300 K=1,KMM1
+      DO 300 J=1,JMM1
+      DO 300 I=1,IM
+      AVGHO         = HO(I,J,K)+HO(I,J+1,K)+HO(I,J+1,K+1)+HO(I,J,K+1)
+      FLUXI(I,J,K)  = 0.25*(AVGHO*FIMAS(I,J,K)
+     &              + WRAIT(I,J,K,NBLCK)*AVGPI(I,J,K))
+  300 CONTINUE
+C
+      DO 310 K=1,KMM1
+      DO 310 J=1,JM
+      DO 310 I=1,IMM1
+      AVGHO        = HO(I,J,K)+HO(I,J,K+1)+HO(I+1,J,K+1)+HO(I+1,J,K)
+      FLUXJ(I,J,K) = 0.25*(AVGHO*FJMAS(I,J,K)
+     &             + WRAJT(I,J,K,NBLCK)*AVGPJ(I,J,K))
+  310 CONTINUE
+C
+      DO 320 K=1,KM
+      DO 320 J=1,JMM1
+      DO 320 I=1,IMM1
+      AVGHO         = HO(I,J,K)+HO(I,J+1,K)+HO(I+1,J+1,K)+HO(I+1,J,K)
+      FLUXK(I,J,K)  = 0.25*(AVGHO*FKMAS(I,J,K)
+     &              + WRAKT(I,J,K,NBLCK)*AVGPK(I,J,K))
+  320 CONTINUE
+C
+      DO 330 K=1,KMM1
+      DO 330 J=1,JMM1
+      DO 330 I=1,IMM1
+      SOURCE(I,J,K) = ENSOURCE(I,J,K,NBLCK)
+  330 CONTINUE
+C
+C
+C     If DTS, retrieve globally stored DTS variables:
+C_____ DTS
+      IF (IF_DTS.EQ.1) THEN
+         DO 325 K=1, KMM1
+         DO 325 J=1, JMM1
+         DO 325 I=1, IMM1
+         FGRP(I,J,K) = ROEGRPALL(I,J,K,NBLCK)
+ 325     CONTINUE
+      END IF
+C_____ END DTS
+C
+C     CALL SUMFLUX TO UPDATE THE INTERNAL ENERGY.
+C
+      IF (IF_DTS.NE.1) CALL SUMFLUX(NBLCK,ROE,DELROE)
+      IF (IF_DTS.EQ.1) CALL SUMFLUX_DTS(NBLCK,ROE,DELROE,FGRP)
+C
+C
+C
+C     SET THE FLUXES OF AXIAL MOMENTUM
+C
+      DO 400 K=1,KMM1
+      DO 400 J=1,JMM1
+      DO 400 I=1,IM
+      AVGVX         = VX(I,J,K)+VX(I,J+1,K)+VX(I,J+1,K+1)+VX(I,J,K+1)
+      FLUXI(I,J,K)  = 0.25*(AVGVX*FIMAS(I,J,K)
+     &              + AIX(I,J,K,NBLCK)*AVGPI(I,J,K))
+      SOURCE(I,J,K) = XFORCE(I,J,K,NBLCK)
+  400 CONTINUE
+C
+      DO 410 K=1,KMM1
+      DO 410 J=1,JM
+      DO 410 I=1,IMM1
+      AVGVX        = VX(I,J,K)+VX(I,J,K+1)+VX(I+1,J,K+1)+VX(I+1,J,K)
+      FLUXJ(I,J,K) = 0.25*(AVGVX*FJMAS(I,J,K)
+     &             + AJX(I,J,K,NBLCK)*AVGPJ(I,J,K))
+  410 CONTINUE
+C
+      DO 420 K=1,KM
+      DO 420 J=1,JMM1
+      DO 420 I=1,IMM1
+      AVGVX        = VX(I,J,K)+VX(I,J+1,K)+VX(I+1,J+1,K)+VX(I+1,J,K)
+      FLUXK(I,J,K) = 0.25*(AVGVX*FKMAS(I,J,K)
+     &             + AKX(I,J,K,NBLCK)*AVGPK(I,J,K))
+  420 CONTINUE
+C
+C
+C      STORE THE OLD ROVX FOR CONVERGENCE CHECK EVERY 5 STEPS.
+C
+      IF(MOD(NSTEP,5).EQ.0) THEN
+C
+      DO 450 K=1,KM
+      DO 450 J=1,JM
+      DO 450 I=1,IM
+      STORE2(I,J,K) = ROVX(I,J,K)
+  450 CONTINUE
+      ENDIF
+C
+C_____DTS
+C     If DTS, retrieve globally stored DTS variables:
+C
+      IF (IF_DTS.EQ.1) THEN
+         DO 455 K=1, KMM1
+         DO 455 J=1, JMM1
+         DO 455 I=1, IMM1
+         FGRP(I,J,K) = ROVXGRPALL(I,J,K,NBLCK)
+ 455     CONTINUE
+      END IF
+C_____ END DTS
+C
+C     CALL SUMFLUX TO UPDATE THE AXIAL MOMENTON.
+C
+      IF (IF_DTS.NE.1) CALL SUMFLUX(NBLCK,ROVX,DELROVX)
+      IF (IF_DTS.EQ.1) CALL SUMFLUX_DTS(NBLCK,ROVX,DELROVX,FGRP)
+C
+C
+C     PERFORM A CONVERGENCE CHECK EVERY 5 STEPS.
+C
+      IF(MOD(NSTEP,5).EQ.0) THEN
+C
+      DMAX = 0.0
+      DAVG = 0.0
+      DO 460 K=2,KMM1
+      DO 460 J=2,JMM1
+      DO 460 I=2,IMM1
+      DIFF = FAC_RVREF*(ROVX(I,J,K)-STORE2(I,J,K))
+      DAVG = DAVG + ABS(DIFF)
+      IF(ABS(DIFF).GT.ABS(DMAX)) THEN
+      DMAX = DIFF
+      IMAX = I
+      JMAX = J
+      KMAX = K
+      ENDIF
+  460 CONTINUE
+      DAVGALL = DAVGALL + DAVG
+      DAVG = DAVG/(IMJMKM)
+C
+      WRITE(6,1111) NSTEP,NBLCK,DMAX,IMAX,JMAX,KMAX,DAVG,RVREF
+ 1111 FORMAT(13H STEP NUMBER ,I5,14H BLOCK NUMBER ,I3,6H DMAX=,F8.4,4H
+     &AT ,3I5,6H DAVG=,F8.4,9H RO_VAVG=,F8.2)
+      WRITE(4,1122) NBLCK,DMAX,DAVG,RVREF
+ 1122 FORMAT(I10,3E12.5)
+      ENDIF
+C
+C     END OF CONVERGENCE CHECK
+C
+C
+C     SET THE FLUXES OF MOMENT OF MOMENTUM.
+C
+      DO 500 K=1,KMM1
+      DO 500 J=1,JMM1
+      DO 500 I=1,IM
+      AVGVT = VT(I,J,K) + VT(I,J+1,K) + VT(I,J+1,K+1) + VT(I,J,K+1)
+      AVGR  =  RBLK(I,J,K) + RBLK(I,J+1,K) + RBLK(I,J+1,K+1) 
+     &      +  RBLK(I,J,K+1)
+      STORE2(I,J,K) = AVGVT
+      FLUXI(I,J,K)  = 0.0625*AVGR*(AVGVT*FIMAS(I,J,K)
+     &              + AIT(I,J,K,NBLCK)*AVGPI(I,J,K))
+      SOURCE(I,J,K) = TFORCE(I,J,K,NBLCK)
+  500 CONTINUE
+C
+      DO 510 K=1,KMM1
+      DO 510 J=1,JM
+      DO 510 I=1,IMM1
+      AVGVT = VT(I,J,K) + VT(I,J,K+1) + VT(I+1,J,K+1) + VT(I+1,J,K)
+      AVGR  = RBLK(I,J,K) + RBLK(I,J,K+1) + RBLK(I+1,J,K+1) 
+     &      + RBLK(I+1,J,K)
+      FLUXJ(I,J,K) = 0.0625*AVGR*(AVGVT*FJMAS(I,J,K)
+     &             + AJT(I,J,K,NBLCK)*AVGPJ(I,J,K))
+  510 CONTINUE
+C
+      DO 520 K=1,KM
+      DO 520 J=1,JMM1
+      DO 520 I=1,IMM1
+      AVGVT = VT(I,J,K) + VT(I,J+1,K) + VT(I+1,J+1,K) + VT(I+1,J,K)
+      AVGR  = RBLK(I,J,K) + RBLK(I,J+1,K) + RBLK(I+1,J+1,K)
+     &      + RBLK(I+1,J,K)
+      FLUXK(I,J,K) = 0.0625*AVGR*(AVGVT*FKMAS(I,J,K)
+     &             + AKT(I,J,K,NBLCK)*AVGPK(I,J,K))
+  520 CONTINUE
+C
+C
+C_____DTS
+C     If DTS, retrieve globally stored DTS variables:
+C
+      IF (IF_DTS.EQ.1) THEN
+         DO 525 K=1, KMM1
+         DO 525 J=1, JMM1
+         DO 525 I=1, IMM1
+         FGRP(I,J,K) = RORVTGRPALL(I,J,K,NBLCK)
+ 525     CONTINUE
+      END IF
+C_____END DTS
+C
+C     CALL SUMFLUX TO UPDATE THE MOMENT OF MOMENTON.
+C
+      IF (IF_DTS.NE.1) CALL SUMFLUX(NBLCK,RORVT,DELRORVT)
+      IF (IF_DTS.EQ.1) CALL SUMFLUX_DTS(NBLCK,RORVT,DELRORVT,FGRP)
+C
+C
+C     SET THE FLUXES OF RADIAL MOMENTUM
+C
+      DO 600 K=1,KMM1
+      DO 600 J=1,JMM1
+      DO 600 I=1,IM
+      AVGVR = VR(I,J,K) + VR(I,J+1,K) + VR(I,J+1,K+1) + VR(I,J,K+1)
+      FLUXI(I,J,K)  = 0.25*(AVGVR*FIMAS(I,J,K)
+     &              + AIR(I,J,K,NBLCK)*AVGPI(I,J,K))
+  600 CONTINUE
+C
+      DO 610 K=1,KMM1
+      DO 610 J=1,JMM1
+      DO 610 I=1,IMM1
+      PAVG    =       AVGPI(I,J,K)   + AVGPI(I+1,J,K)
+      AVGVT   = 0.125*(STORE2(I,J,K) + STORE2(I+1,J,K))
+      AVGROVT =       (STORE1(I,J,K) + STORE1(I+1,J,K))
+      SOURCE(I,J,K) = (PAVG + AVGVT*AVGROVT)*VOLOR(I,J,K,NBLCK)
+     &              + RFORCE(I,J,K,NBLCK)
+  610 CONTINUE
+C
+      DO 620 K=1,KMM1
+      DO 620 J=1,JM
+      DO 620 I=1,IMM1
+      AVGVR = VR(I,J,K) + VR(I,J,K+1) + VR(I+1,J,K+1) + VR(I+1,J,K)
+      FLUXJ(I,J,K) = 0.25*(AVGVR*FJMAS(I,J,K)
+     &             +  AJR(I,J,K,NBLCK)*AVGPJ(I,J,K))
+  620 CONTINUE
+C
+      DO 630 K=1,KM
+      DO 630 J=1,JMM1
+      DO 630 I=1,IMM1
+      AVGVR = VR(I,J,K) + VR(I,J+1,K) + VR(I+1,J+1,K) + VR(I+1,J,K)
+      FLUXK(I,J,K) = 0.25*(AVGVR*FKMAS(I,J,K)
+     &             + AKR(I,J,K,NBLCK)*AVGPK(I,J,K))
+  630 CONTINUE
+C
+C_____DTS
+      IF (IF_DTS.EQ.1) THEN
+         DO 635 K=1, KMM1
+         DO 635 J=1, JMM1
+         DO 635 I=1, IMM1
+         FGRP(I,J,K) = ROVRGRPALL(I,J,K,NBLCK)
+ 635     CONTINUE
+      END IF
+C_____END DTS
+C
+C     CALL SUMFLUX TO UPDATE THE RADIAL MOMENTON.
+C
+      IF (IF_DTS.NE.1) CALL SUMFLUX(NBLCK,ROVR,DELROVR)
+      IF (IF_DTS.EQ.1) CALL SUMFLUX_DTS(NBLCK,ROVR,DELROVR,FGRP)
+C
+C
+C     STORE THE PRIMARY VARABLES GLOBALLY
+C
+      DO 700 K=1,KM
+      DO 700 J=1,JM
+      DO 700 I=1,IM
+      ROALL(I,J,K,NBLCK)       = RO(I,J,K)
+      ROEALL(I,J,K,NBLCK)      = ROE(I,J,K)
+      ROVXALL(I,J,K,NBLCK)     = ROVX(I,J,K)
+      ROVRALL(I,J,K,NBLCK)     = ROVR(I,J,K)
+      RORVTALL(I,J,K,NBLCK)    = RORVT(I,J,K)
+  700 CONTINUE
+C
+C     STORE THE CHANGES GLOBALLY
+C
+      DO 701 K=1,KMM1
+      DO 701 J=1,JMM1
+      DO 701 I=1,IMM1
+      DELROALL(I,J,K,NBLCK)    = DELRO(I,J,K)
+      DELROEALL(I,J,K,NBLCK)   = DELROE(I,J,K)
+      DELROVXALL(I,J,K,NBLCK)  = DELROVX(I,J,K)
+      DELROVRALL(I,J,K,NBLCK)  = DELROVR(I,J,K)
+      DELRORVTALL(I,J,K,NBLCK) = DELRORVT(I,J,K)
+  701 CONTINUE
+C
+C      END OF THE LOOP OVER ONE BLOCK.
+C
+10000 CONTINUE
+C
+C
+C     ALL BLOCKS HAVE NOW BEEN UPDATED.
+C
+C
+C      WRITE OUT THE AVERAGE CHANGE IN ROVX EVERY 5 STEPS.
+C
+      IF(MOD(NSTEP,5).EQ.0) THEN
+C
+      DAVGALL  =      DAVGALL/FLOAT(NPOINT_TOT)
+      WRITE(6,776)    DAVGALL
+  776 FORMAT(' GLOBAL AVERAGE PERCENTAGE CHANGE IN ROVX = ',F10.6) 
+C
+      ENDIF
+C
+      IF(MOD(NSTEP,25).EQ.0.OR.(NBTSTEP.GT.1.AND.NSTEP.EQ.1)) THEN      
+C
+      FLOWRAT  =      FLOWOUT/FLOWIN
+      TOAVGIN  = 0.25*HOAVGIN/(CP*FLOWIN)
+      TOAVGOUT = 0.25*HOAVGOUT/(CP*FLOWOUT)
+      POAVGIN  = 0.25*POAVGIN/FLOWIN
+      POAVGOUT = 0.25*POAVGOUT/FLOWOUT
+      TRAT_IS  = (POAVGOUT/POAVGIN)**FGA
+C
+C
+C      WRITE OUT THE INLET AND OUTLET FLOW AND EFFICIENCY EVERY 25 STEPS.
+C
+      WRITE(6,*)
+      WRITE(6,777) FLOWIN,FLOWOUT,FLOWRAT
+  777 FORMAT('      INLET FLOW = ',F12.5,'       OUTLET FLOW = ',F12.5,
+     & ' FLOW RATIO = ',F10.4) 
+      WRITE(6,778) POAVGIN,POAVGOUT
+  778 FORMAT('AVG INLET STAG P = ',F12.1,' AVG OUTLET STAG P = ',F12.1) 
+      WRITE(6,779) TOAVGIN,TOAVGOUT
+  779 FORMAT('AVG INLET STAG T = ',F12.3,' AVG OUTLET STAG T = ',F12.3)
+      WRITE(6,*)
+      WRITE(6,*) '  DELTA WING LIFT AND DRAG, AWING = ',AWING
+      WRITE(6,*) '  PRESSURE LIFT, PRESSURE DRAG',  PLIFT,PDRAG
+      WRITE(6,*) '  VISCOUS LIFT , VISCOUS DRAG ',  VLIFT,VDRAG
+      WRITE(6,*) ' INLET DYNAMIC HEAD = ', P_DYNAMIC_IN
+      WRITE(6,*) ' TOTAL LIFT COEFF.= ',(PLIFT+VLIFT)/AWING/P_DYNAMIC_IN
+      WRITE(6,*) ' TOTAL DRAG COEFF.= ',(PDRAG+VDRAG)/AWING/P_DYNAMIC_IN
+
+C
+C      WRITE(6,*)' ASSUMING A SINGLE INLET AND SINGLE OUTLET FLOW, THEN '
+C
+C      IF(TRAT_IS.GT.1.00) THEN
+C      DTO_IS  = TOAVGIN*(TRAT_IS - 1.0)
+C      DTO_ACT = TOAVGOUT - TOAVGIN
+C      ETA_TT  = DTO_IS/DTO_ACT
+C      WRITE(6,*)' COMPRESSOR:     TOTAL-TOTAL ISENTROPIC EFFICIENCY= ',
+C     &            ETA_TT
+C      ENDIF
+C
+C      IF(TRAT_IS.LT.1.00) THEN
+C      DTO_IS  = TOAVGIN*(1.0 - TRAT_IS)
+C      DTO_ACT = TOAVGIN - TOAVGOUT
+C      ETA_TT  = DTO_ACT/DTO_IS
+C      WRITE(6,*)' TURBINE:     TOTAL-TOTAL ISENTROPIC EFFICIENCY = ',
+C     &            ETA_TT
+C      ENDIF
+C
+      WRITE(6,*)
+C
+      ENDIF
+C
+C
+C
+      RETURN
+      END
+C
+C**************************************************************************
+C
+      SUBROUTINE SUMFLUX(NBLCK,VAR,DELVAR)
+C       ====================
+C
+C       THIS ROUTINE UPDATES THE GIVEN VARIABLE EVERY
+C       TIMESTEP (I.E. RO ROVR ROVT ROVX ROE)
+C       AND ALSO CALLS THE SMOOTHING SUBROUTINE
+C       MOST OF THE COMPUTATIONAL TIME IS USED BY THIS SUBROUTINE
+C
+C       ====================
+      INCLUDE 'commall-29'
+      PARAMETER(NIBLOK=75,NJBLOK=75,NKBLOK=75)
+C
+C
+      DIMENSION VAR(NIM,NJM,NKM),DELVAR(NIM,NJM,NKM),IB(NIM),
+     &          JB(NJM),KB(NKM),BLKSTEP(NIBLOK,NJBLOK,NKBLOK),
+     &          BLKCHG(NIBLOK,NJBLOK,NKBLOK)
+C
+C    CHECK DIMENSIONS
+C
+      IF(NIBLOK.LT.NIM/4) THEN
+      WRITE(6,*)'STOPPING BECAUSE IBLOK DIMENSION TOO SMALL IN SUMFLUX '
+      STOP
+      ENDIF
+      IF(NJBLOK.LT.NJM/4) THEN
+      WRITE(6,*)'STOPPING BECAUSE JBLOK DIMENSION TOO SMALL IN SUMFLUX '
+      STOP
+      ENDIF
+      IF(NKBLOK.LT.NKM/4) THEN
+      WRITE(6,*)'STOPPING BECAUSE KBLOK DIMENSION TOO SMALL IN SUMFLUX ' 
+      STOP
+      ENDIF
+C 
+C          
+      HALF   = 0.5
+      QUART  = 0.25
+      EIGHTH = 0.125
+      IM     = NI(NBLCK)
+      JM     = NJ(NBLCK)
+      KM     = NK(NBLCK)
+      IMID   = IM/2
+      JMID   = JM/2
+      KMID   = KM/2
+      IMM1   = IM-1
+      JMM1   = JM-1
+      KMM1   = KM-1
+      NPOINTS = IMM1*JMM1*KMM1
+C
+C JDD warning !    MULTIGRID BLOCK SIZES ARE CURRENTLY FIXED HERE.
+C
+      IBLOCK = 4
+      JBLOCK = 4
+      KBLOCK = 4
+      IH     = IBLOCK/2
+      JH     = JBLOCK/2
+      KH     = KBLOCK/2
+C
+C     SET THE MULTIGRID BLOCK INDICES ,IB(I),JB(J), KB(K).
+C
+      DO 5 I =1,IMM1
+      IB(I) = 1 + (I-1)/IBLOCK
+      NLEFT = IMM1 - (IB(I)-1)*IBLOCK
+      IF(NLEFT.LT.IH)  IB(I) = IB(I-1)
+    5 CONTINUE
+C
+      DO 6 J =1,JMM1
+      JB(J) = 1 + (J-1)/JBLOCK
+      NLEFT = JMM1 - (JB(J)-1)*JBLOCK
+      IF(NLEFT.LT.JH) JB(J) = JB(J-1)
+    6 CONTINUE
+C
+      DO 7 K =1,KMM1
+      KB(K) = 1 + (K-1)/KBLOCK
+      NLEFT = KMM1 - (KB(K)-1)*KBLOCK
+      IF(NLEFT.LT.KH) KB(K) = KB(K-1)
+    7 CONTINUE
+C
+      NIBLK  = IB(IMM1)
+      NJBLK  = JB(JMM1)
+      NKBLK  = KB(KMM1)
+C
+C     SET THE MULTIGRID BLOCK TIME STEPS.
+C
+      FACSTEP = FMGRID(NBLCK)*MIN(IBLOCK,JBLOCK,KBLOCK)
+     &                       /(IBLOCK*JBLOCK*KBLOCK)
+C
+      DO 50 K=1,NKBLK
+      KBMID = (K-1)*KBLOCK  + KBLOCK/2
+      DO 50 J=1,NJBLK
+      JBMID = (J-1)*JBLOCK  + JBLOCK/2     
+      DO 50 I=1,NIBLK
+      IBMID  = (I-1)*IBLOCK + IBLOCK/2
+      BLKCHG(I,J,K)  = 0.0
+      BLKSTEP(I,J,K) = STEP(IBMID,JBMID,KBMID,NBLCK)*FACSTEP
+   50 CONTINUE
+C
+C
+C
+C     CHECK IF ANY MIXING PLANE TREATMENT IS REQUIRED
+C
+      DO 10 NP=1,NPATCH(NBLCK)
+C
+      IF(PATCHTYPE(NP,NBLCK).EQ.'M') THEN
+C
+      IFACE  =  IPATCHS(NP,NBLCK)
+C
+C     START THE MIXING PLANE FLUX EXTRAPOLATION
+C
+      KSTART =  KPATCHS(NP,NBLCK)
+      KEND   =  KPATCHE(NP,NBLCK)
+      IMIN1  =  IFACE - 1
+      IMIN2  =  IFACE - 3
+      IF(IFACE.EQ.1) THEN
+      IMIN1 = 2
+      IMIN2 = 4
+      ENDIF
+C
+      DO 30 J = 1,JMM1
+      AVFMIN2 = 0.0
+      AVFMIN1 = 0.0
+      AVGFLUX = 0.0
+      DRTHETA =  RT(IFACE,J,KEND,NBLCK) - RT(IFACE,J,KSTART,NBLCK)
+      DRTMIN1 =  RT(IMIN1,J,KEND,NBLCK) - RT(IMIN1,J,KSTART,NBLCK)
+      DRTMIN2 =  RT(IMIN2,J,KEND,NBLCK) - RT(IMIN2,J,KSTART,NBLCK)
+      DO 20 K = KSTART,KEND-1
+      AVFMIN2 = AVFMIN2 + FLUXI(IMIN2,J,K)
+      AVFMIN1 = AVFMIN1 + FLUXI(IMIN1,J,K)
+      AVGFLUX = AVGFLUX + FLUXI(IFACE,J,K)
+   20 CONTINUE
+      DO 40 K =  KSTART,KEND-1
+      FTHETA  = (RT(IFACE,J,K+1,NBLCK) - RT(IFACE,J,K,NBLCK))/DRTHETA
+      FTMIN1  = (RT(IMIN1,J,K+1,NBLCK) - RT(IMIN1,J,K,NBLCK))/DRTMIN1
+      FTMIN2  = (RT(IMIN2,J,K+1,NBLCK) - RT(IMIN2,J,K,NBLCK))/DRTMIN2
+      DFMIN1  = FLUXI(IMIN1,J,K)  - AVFMIN1*FTMIN1
+      DFMIN2  = FLUXI(IMIN2,J,K)  - AVFMIN2*FTMIN2
+C
+C      FLUXI(IFACE,J,K) = AVGFLUX*FTHETA
+C     &           + FEXTRAP*FTHETA*(1.5*DFMIN1/FTMIN1 -0.5*DFMIN2/FTMIN2)  
+C
+C      FLUXI(IFACE,J,K) = AVGFLUX*FTHETA
+C     &                 + FTHETA*DFMIN1/FTMIN1      
+C     &                 + FEXTRAP*FTHETA*(DFMIN1/FTMIN1 - DFMIN2/FTMIN2)  
+C
+      FLUXI(IFACE,J,K)   = (DFMIN1*FEXTRAP/FTMIN1 + AVGFLUX)*FTHETA
+C
+   40 CONTINUE
+   30 CONTINUE
+C
+      ENDIF
+C
+C     END OF MIXING PLANE FLUX EXTRAPOLATION.
+C
+   10 CONTINUE
+C
+C      
+C
+C      SUM THE FLUXES DO NOT YET MULTIPLY BY THE TIME STEP. SET = STORE(I,J,K).
+C
+      SUMCHG   = 0.0
+      DO 999 K = 1,KMM1
+      KP1 = K+1
+      DO 999 J = 1,JMM1
+      JP1 = J+1
+      DO 999 I = 1,IMM1
+      DELTA         = FLUXJ(I,J,K)-FLUXJ(I,JP1,K)
+     &              + FLUXK(I,J,K)-FLUXK(I,J,KP1)
+     &              + FLUXI(I,J,K)-FLUXI(I+1,J,K)
+     &              + SOURCE(I,J,K)
+      STORE(I,J,K)  = (2.0*DELTA - DELVAR(I,J,K))
+      DELVAR(I,J,K) = DELTA
+  999 CONTINUE
+C
+C     SUM THE CHANGES TO FIND THE MULTIGRID BLOCK CHANGES
+C
+      SUPERCHANGE = 0.0
+      DO 100 K=1,KMM1
+      KBK = KB(K)
+      DO 100 J=1,JMM1
+      JBK = JB(J)
+      DO 100 I=1,IMM1
+      IBK = IB(I)
+      BLKCHG(IBK,JBK,KBK) = BLKCHG(IBK,JBK,KBK) + STORE(I,J,K)
+      SUPERCHANGE         = SUPERCHANGE  + STORE(I,J,K)
+  100 CONTINUE
+C
+C     COMBINE THE SINGLE BLOCK CHANGES AND THE MULTIGRID BLOCK CHANGES
+C
+      SSTEP = SUPERSTEP(NBLCK)
+      DO 200 K=1,KMM1
+      KBK = KB(K)
+      DO 200 J=1,JMM1
+      JBK = JB(J)
+      DO 200 I=1,IMM1
+      IBK = IB(I)
+      STORE(I,J,K) = STORE(I,J,K)*STEP(I,J,K,NBLCK)
+     &             + BLKCHG(IBK,JBK,KBK)*BLKSTEP(IBK,JBK,KBK)
+     &             + SUPERCHANGE*SSTEP
+      SUMCHG       = SUMCHG + ABS(STORE(I,J,K))
+  200 CONTINUE
+C
+      IF(SUMCHG.LE.0.0)  SUMCHG = .001
+      IF(DAMP.LT.1.0.OR.DAMP.GT.99.9) GO TO 1530
+C
+C
+C      APPLY THE NEGATIVE FEEDBACK TO LIMIT THE MAXIMUM CHANGE.
+C
+      AVGCHG = DAMP*SUMCHG/NPOINTS
+C
+      DO 1525 K=1,KMM1
+      DO 1525 J=1,JMM1
+      DO 1525 I=1,IMM1
+      DELTA         = STORE(I,J,K)
+      ABSCHG        = ABS(DELTA)
+      STORE(I,J,K)  = DELTA/(1. + ABSCHG/AVGCHG)
+ 1525 CONTINUE
+C
+ 1530 CONTINUE
+C
+C
+C              ADD THE CHANGES STORE(I,J,K) TO THE OLD VALUE OF THE VARIABLE
+C              VAR(I,J,K) DISTRIBUTING THE CHANGES TO THE FOUR CORNERS
+C
+C     FIRST ADD THE CELL CHANGES TO ALL CORNERS OF INTERIOR CELLS AND THE
+C     I = 1 and I=IM FACES.
+C
+      DO 1100 K = 2,KMM1
+      KM1 = K-1
+      DO 1100 J = 2,JMM1
+      JM1 = J-1
+      SUMP = EIGHTH*(STORE(1,JM1,K) + STORE(1,JM1,KM1)
+     &             + STORE(1,J,K)   + STORE(1,J,KM1))
+      VAR(1,J,K)  = VAR(1,J,K) + 2.0*SUMP
+      DO 1101 I = 2,IMM1
+      SUM =  EIGHTH*(STORE(I,JM1,K) + STORE(I,JM1,KM1)
+     &             + STORE(I,J,K)   + STORE(I,J,KM1))
+      VAR(I,J,K)  = VAR(I,J,K)  +  SUM  + SUMP
+      SUMP = SUM
+ 1101 CONTINUE
+      VAR(IM,J,K) = VAR(IM,J,K) + 2.0*SUMP
+ 1100 CONTINUE
+C
+C
+C     NEXT ADD AN EXTRA CHANGES TO THE K = 1 and K = KM SURFACES
+C     INCLUDING THE I = 1 and IM surfaces BUT NOT THE J=1 and JM CORNERS.
+C
+C     FIRST K = 1
+C
+      DO 1120 J = 2,JMM1
+      JM1 = J-1
+      SUMP        = QUART*(STORE(1,JM1,1) + STORE(1,J,1))
+      VAR(1,J,1)  = VAR(1,J,1) + 2.0*SUMP
+      DO 1121 I = 2,IMM1
+      SUM         = QUART*(STORE(I,JM1,1) + STORE(I,J,1))
+      VAR(I,J,1)  = VAR(I,J,1) + SUM + SUMP
+      SUMP        = SUM
+ 1121 CONTINUE
+      VAR(IM,J,1) = VAR(IM,J,1) + 2.0*SUMP
+ 1120 CONTINUE
+C
+C      NOW K = KM
+C
+      DO 1125 J  = 2,JMM1
+      JM1 = J-1
+      SUMP         = QUART*(STORE(1,JM1,KMM1) + STORE(1,J,KMM1))
+      VAR(1,J,KM)  = VAR(1,J,KM) + 2.0*SUMP
+      DO 1126 I  = 2,IMM1
+      SUM          = QUART*(STORE(I,JM1,KMM1) + STORE(I,J,KMM1))
+      VAR(I,J,KM)  = VAR(I,J,KM) + SUM + SUMP
+      SUMP         = SUM
+ 1126 CONTINUE
+      VAR(IM,J,KM) = VAR(IM,J,KM) + 2.0*SUMP
+ 1125 CONTINUE
+C
+C     ADD THE CHANGES TO THE J = 1 and J = JM BOUNDARIES
+C     INCLUDING I = 1 and IM BUT NOT K=1 and K=KM.
+C
+C     FIRST J=1.
+C
+      DO 1130 K = 2,KMM1
+      KM1 = K-1
+      SUMP        = QUART*(STORE(1,1,K) + STORE(1,1,KM1))
+      VAR(1,1,K)  = VAR(1,1,K) + 2.*SUMP
+      DO 1131 I = 2,IMM1
+      SUM         = QUART*(STORE(I,1,K) + STORE(I,1,KM1))
+      VAR(I,1,K)  = VAR(I,1,K) + SUM + SUMP
+      SUMP        = SUM
+ 1131 CONTINUE
+      VAR(IM,1,K) = VAR(IM,1,K) + 2.0*SUMP
+ 1130 CONTINUE
+C
+C     NOW J=JM.
+C
+      DO 1132 K = 2,KMM1
+      KM1 = K-1
+      SUMP        = QUART*(STORE(1,JMM1,K) + STORE(1,JMM1,KM1))
+      VAR(1,JM,K) = VAR(1,JM,K) + 2.*SUMP
+      DO 1133 I = 2,IMM1
+      SUM         = QUART*(STORE(I,JMM1,K) + STORE(I,JMM1,KM1))
+      VAR(I,JM,K) = VAR(I,JM,K) + SUM + SUMP
+      SUMP        = SUM
+ 1133 CONTINUE
+      VAR(IM,JM,K) = VAR(IM,JM,K) + 2.0*SUMP
+ 1132 CONTINUE
+C
+C
+C     NOW UPDATE THE CORNER NODES: K=1,J=1.  K=KM,J=1. K=1,J=JM.  K=KM,J=JM.
+C
+C     FIRST THE K = 1,J = 1 CORNER.
+C
+      SUMP       = 0.5*STORE(1,1,1)
+      VAR(1,1,1) = VAR(1,1,1) + 2.*SUMP
+      DO 1140 I  = 2,IMM1
+      SUM        = 0.5*STORE(I,1,1)
+      VAR(I,1,1) = VAR(I,1,1) + SUM + SUMP
+      SUMP       =  SUM
+ 1140 CONTINUE
+      VAR(IM,1,1) = VAR(IM,1,1) + 2.*SUMP
+C
+C     NEXT THE K = 1,J = JM CORNER.
+C
+      SUMP        = 0.5*STORE(1,JMM1,1)
+      VAR(1,JM,1) = VAR(1,JM,1) + 2.*SUMP
+      DO 1150   I = 2,IMM1
+      SUM         = 0.5*STORE(I,JMM1,1)
+      VAR(I,JM,1) = VAR(I,JM,1) + SUM + SUMP
+      SUMP        =  SUM
+ 1150 CONTINUE
+      VAR(IM,JM,1) = VAR(IM,JM,1) + 2.*SUMP
+C
+C     NEXT THE K = KM,J = 1 CORNER.
+C
+      SUMP        = 0.5*STORE(1,1,KMM1)
+      VAR(1,1,KM) = VAR(1,1,KM) + 2.*SUMP
+      DO 1160   I = 2,IMM1
+      SUM         = 0.5*STORE(I,1,KMM1)
+      VAR(I,1,KM) = VAR(I,1,KM) + SUM + SUMP
+      SUMP        =  SUM
+ 1160 CONTINUE
+      VAR(IM,1,KM) = VAR(IM,1,KM) + 2.*SUMP
+C
+C     NEXT THE K = KM,J = JM CORNER.
+C
+      SUMP         = 0.5*STORE(1,JMM1,KMM1)
+      VAR(1,JM,KM) = VAR(1,JM,KM) + 2.*SUMP
+      DO 1170 I    = 2,IMM1
+      SUM          = 0.5*STORE(I,JMM1,KMM1)
+      VAR(I,JM,KM) = VAR(I,JM,KM) + SUM + SUMP
+      SUMP         =  SUM
+ 1170 CONTINUE
+      VAR(IM,JM,KM) = VAR(IM,JM,KM) + 2.*SUMP
+C
+C
+C    CALL THE SMOOTHING ROUTINE TO APPLY THE ARTIFICIAL VISCOSITY.
+C
+      CALL NUSMOOTH(NBLCK,VAR)
+C
+      RETURN
+      END
+C
+C
+C******************************************************************************
+C**************************************************************************
+C
+      SUBROUTINE SUMFLUX_DTS(NBLCK,VAR,DELVAR,FGRP)
+C       ====================
+C
+C       THIS ROUTINE UPDATES THE GIVEN VARIABLE EVERY
+C       TIMESTEP (I.E. RO ROVR ROVT ROVX ROE)
+C       AND ALSO CALLS THE SMOOTHING SUBROUTINE
+C       MOST OF THE COMPUTATIONAL TIME IS USED BY THIS SUBROUTINE
+C
+C       ====================
+      INCLUDE 'commall-29'
+C
+      PARAMETER(NIBLOK=75,NJBLOK=75,NKBLOK=75)
+C
+C           
+      DIMENSION VAR(NIM,NJM,NKM),DELVAR(NIM,NJM,NKM),IB(NIM),
+     &          JB(NJM),KB(NKM),BLKSTEP(NIBLOK,NJBLOK,NKBLOK),
+     &          BLKCHG(NIBLOK,NJBLOK,NKBLOK)
+C
+      DIMENSION FGRP(IMDT,JMDT,KMDT)
+C
+C    CHECK DIMENSIONS
+C
+      IF(NIBLOK.LT.NIM/4) THEN
+      WRITE(6,*)'STOPPING BECAUSE IBLOK DIMENSION TOO SMALL IN SUMFLUX.'
+      STOP
+      ENDIF
+      IF(NJBLOK.LT.NJM/4) THEN
+      WRITE(6,*)'STOPPING BECAUSE JBLOK DIMENSION TOO SMALL IN SUMFLUX.'
+      STOP
+      ENDIF
+      IF(NKBLOK.LT.NKM/4) THEN
+      WRITE(6,*)'STOPPING BECAUSE KBLOK DIMENSION TOO SMALL IN SUMFLUX.' 
+      STOP
+      ENDIF
+C
+C
+      HALF   = 0.5
+      QUART  = 0.25
+      EIGHTH = 0.125
+      THREE_SIXTEENTH =  0.1875
+      IM     = NI(NBLCK)
+      JM     = NJ(NBLCK)
+      KM     = NK(NBLCK)
+      IMID   = IM/2
+      JMID   = JM/2
+      KMID   = KM/2
+      IMM1   = IM-1
+      JMM1   = JM-1
+      KMM1   = KM-1
+      MAXD   = MAX(IMM1,JMM1,KMM1)
+      IMID   = IM/2
+      NPOINTS = IMM1*JMM1*KMM1
+C
+C JDD warning !    MULTIGRID BLOCK SIZES ARE CURRENTLY FIXED HERE.
+C
+      IBLOCK = 4
+      JBLOCK = 4
+      KBLOCK = 4
+      IH     = IBLOCK/2
+      JH     = JBLOCK/2
+      KH     = KBLOCK/2
+C
+C     SET THE MULTIGRID BLOCK INDICES ,IB(I),JB(J), KB(K).
+C
+      DO 5 I =1,IMM1
+      IB(I) = 1 + (I-1)/IBLOCK
+      NLEFT = IMM1 - (IB(I)-1)*IBLOCK
+      IF(NLEFT.LT.IH)  IB(I) = IB(I-1)
+    5 CONTINUE
+C
+      DO 6 J =1,JMM1
+      JB(J) = 1 + (J-1)/JBLOCK
+      NLEFT = JMM1 - (JB(J)-1)*JBLOCK
+      IF(NLEFT.LT.JH) JB(J) = JB(J-1)
+    6 CONTINUE
+C
+      DO 7 K =1,KMM1
+      KB(K) = 1 + (K-1)/KBLOCK
+      NLEFT = KMM1 - (KB(K)-1)*KBLOCK
+      IF(NLEFT.LT.KH) KB(K) = KB(K-1)
+    7 CONTINUE
+C
+      NIBLK  = IB(IMM1)
+      NJBLK  = JB(JMM1)
+      NKBLK  = KB(KMM1)
+C
+C     SET THE MULTIGRID BLOCK TIME STEPS.
+C
+      FACSTEP = FMGRID(NBLCK)*MIN(IBLOCK,JBLOCK,KBLOCK)
+     &                       /(IBLOCK*JBLOCK*KBLOCK)
+C
+C
+      DO 50 K=1,NKBLK
+      KBMID = (K-1)*KBLOCK  + KBLOCK/2
+      DO 50 J=1,NJBLK
+      JBMID = (J-1)*JBLOCK  + JBLOCK/2     
+      DO 50 I=1,NIBLK
+      IBMID  = (I-1)*IBLOCK + IBLOCK/2
+      BLKCHG(I,J,K)  = 0.0
+      BLKSTEP(I,J,K) = STEP(IBMID,JBMID,KBMID,NBLCK)*FACSTEP
+   50 CONTINUE
+C
+C
+C
+C     CHECK IF ANY MIXING PLANE TREATMENT IS REQUIRED
+C
+      DO 10 NP=1,NPATCH(NBLCK)
+C
+      IF(PATCHTYPE(NP,NBLCK).EQ.'M') THEN
+C
+      IFACE  =  IPATCHS(NP,NBLCK)
+C
+C     START THE MIXING PLANE FLUX EXTRAPOLATION
+C
+      KSTART =  KPATCHS(NP,NBLCK)
+      KEND   =  KPATCHE(NP,NBLCK)
+      IMIN1  =  IFACE - 1
+      IMIN2  =  IFACE - 3
+      IF(IFACE.EQ.1) THEN
+      IMIN1 = 2
+      IMIN2 = 4
+      ENDIF
+C
+      DO 30 J = 1,JMM1
+      AVFMIN2 = 0.0
+      AVFMIN1 = 0.0
+      AVGFLUX = 0.0
+      DRTHETA =  RT(IFACE,J,KEND,NBLCK) - RT(IFACE,J,KSTART,NBLCK)
+      DRTMIN1 =  RT(IMIN1,J,KEND,NBLCK) - RT(IMIN1,J,KSTART,NBLCK)
+      DRTMIN2 =  RT(IMIN2,J,KEND,NBLCK) - RT(IMIN2,J,KSTART,NBLCK)
+      DO 20 K = KSTART,KEND-1
+      AVFMIN2 = AVFMIN2 + FLUXI(IMIN2,J,K)
+      AVFMIN1 = AVFMIN1 + FLUXI(IMIN1,J,K)
+      AVGFLUX = AVGFLUX + FLUXI(IFACE,J,K)
+   20 CONTINUE
+      DO 40 K =  KSTART,KEND-1
+      FTHETA  = (RT(IFACE,J,K+1,NBLCK) - RT(IFACE,J,K,NBLCK))/DRTHETA
+      FTMIN1  = (RT(IMIN1,J,K+1,NBLCK) - RT(IMIN1,J,K,NBLCK))/DRTMIN1
+      FTMIN2  = (RT(IMIN2,J,K+1,NBLCK) - RT(IMIN2,J,K,NBLCK))/DRTMIN2
+      DFMIN1  = FLUXI(IMIN1,J,K)  - AVFMIN1*FTMIN1
+      DFMIN2  = FLUXI(IMIN2,J,K)  - AVFMIN2*FTMIN2
+C
+C      FLUXI(IFACE,J,K) = AVGFLUX*FTHETA
+C     &           + FEXTRAP*FTHETA*(1.5*DFMIN1/FTMIN1 -0.5*DFMIN2/FTMIN2)  
+C
+C      FLUXI(IFACE,J,K) = AVGFLUX*FTHETA
+C     &                 + FTHETA*DFMIN1/FTMIN1      
+C     &                 + FEXTRAP*FTHETA*(DFMIN1/FTMIN1 - DFMIN2/FTMIN2)  
+C
+      FLUXI(IFACE,J,K)   = (DFMIN1*FEXTRAP/FTMIN1 + AVGFLUX)*FTHETA
+C
+   40 CONTINUE
+   30 CONTINUE
+C
+      ENDIF
+C
+C     END OF MIXING PLANE FLUX EXTRAPOLATION.
+C
+   10 CONTINUE
+C
+C      
+C
+C      SUM THE FLUXES DO NOT YET MULTIPLY BY THE TIME STEP. SET = STORE(I,J,K).
+C
+      SUMCHG   = 0.0
+      DO 999 K = 1,KMM1
+      DO 999 J = 1,JMM1
+      DO 999 I = 1,IMM1
+C
+      AVG           =         VAR(I,J,K)     + VAR(I+1,J,K)+
+     &                        VAR(I,J+1,K)   + VAR(I,J,K+1)+
+     &                        VAR(I+1,J+1,K) + VAR(I+1,J,K+1)+
+     &                        VAR(I,J+1,K+1) + VAR(I+1,J+1,K+1)
+C
+      DFTARGET      =         THREE_SIXTEENTH*AVG - FGRP(I,J,K)
+C
+      VOLOT         =         VOL(I,J,K,NBLCK)/TRU_STEP
+C      
+      DELTA         = FLUXJ(I,J,K)-FLUXJ(I,J+1,K)
+     &              + FLUXK(I,J,K)-FLUXK(I,J,K+1)
+     &              + FLUXI(I,J,K)-FLUXI(I+1,J,K)
+     &              + SOURCE(I,J,K) - DFTARGET*VOLOT
+C
+      STORE(I,J,K)  = (2.0*DELTA - DELVAR(I,J,K))
+      DELVAR(I,J,K) = DELTA
+  999 CONTINUE
+C
+C     SUM THE CHANGES TO FIND THE MULTIGRID BLOCK CHANGES
+C
+      SUPERCHANGE = 0.0
+      DO 100 K=1,KMM1
+      KBK = KB(K)
+      DO 100 J=1,JMM1
+      JBK = JB(J)
+      DO 100 I=1,IMM1
+      IBK = IB(I)
+      BLKCHG(IBK,JBK,KBK) = BLKCHG(IBK,JBK,KBK) + STORE(I,J,K)
+      SUPERCHANGE         = SUPERCHANGE  + STORE(I,J,K)
+  100 CONTINUE
+C
+C     COMBINE THE SINGLE BLOCK CHANGES AND THE MULTIGRID BLOCK CHANGES
+C
+      SSTEP = SUPERSTEP(NBLCK)
+      DO 200 K=1,KMM1
+      KBK = KB(K)
+      DO 200 J=1,JMM1
+      JBK = JB(J)
+      DO 200 I=1,IMM1
+      IBK = IB(I)
+C
+      TSTEP_RATIO   =   STEP(I,J,K,NBLCK)*VOL(I,J,K,NBLCK)/TRU_STEP
+      FAC1          =   1./(1. +  1.5*TSTEP_RATIO)
+      FAC2          =   1./(1. +  6.0*TSTEP_RATIO)
+      FAC3          =   1./(1. +  1.5*MAXD*TSTEP_RATIO)
+C
+      DELTA_F      = STORE(I,J,K)*STEP(I,J,K,NBLCK)*FAC1
+     &             + BLKCHG(IBK,JBK,KBK)*BLKSTEP(IBK,JBK,KBK)*FAC2
+     &             + SUPERCHANGE*SSTEP*FAC3
+C
+      STORE(I,J,K) = DELTA_F
+C
+      SUMCHG       = SUMCHG + ABS(DELTA_F)
+C
+  200 CONTINUE
+C
+C
+      IF(SUMCHG.LE.0.0)  SUMCHG = .001
+      IF(DAMP.LT.1.0.OR.DAMP.GT.99.9) GO TO 1530
+C
+C
+C      APPLY THE NEGATIVE FEEDBACK TO LIMIT THE MAXIMUM CHANGE.
+C
+      AVGCHG = DAMP*SUMCHG/NPOINTS
+C
+      DO 1525 K=1,KMM1
+      DO 1525 J=1,JMM1
+      DO 1525 I=1,IMM1
+      DELTA         = STORE(I,J,K)
+      ABSCHG        = ABS(DELTA)
+      STORE(I,J,K)  = DELTA/(1. + ABSCHG/AVGCHG)
+ 1525 CONTINUE
+C
+ 1530 CONTINUE
+C
+C
+C              ADD THE CHANGES STORE(I,J,K) TO THE OLD VALUE OF THE VARIABLE
+C              VAR(I,J,K) DISTRIBUTING THE CHANGES TO THE FOUR CORNERS
+C
+C     FIRST ADD THE CELL CHANGES TO ALL CORNERS OF INTERIOR CELLS AND THE
+C     I = 1 and I=IM FACES.
+C
+      DO 1100 K = 2,KMM1
+      DO 1100 J = 2,JMM1
+
+      SUMP = EIGHTH*(STORE(1,J-1,K) + STORE(1,J-1,K-1)
+     &             + STORE(1,J,K)   + STORE(1,J,K-1))
+      VAR(1,J,K)  = VAR(1,J,K) + 2.0*SUMP
+      DO 1101 I = 2,IMM1
+      SUM =  EIGHTH*(STORE(I,J-1,K) + STORE(I,J-1,K-1)
+     &             + STORE(I,J,K)   + STORE(I,J,K-1))
+      VAR(I,J,K)  = VAR(I,J,K)  +  SUM  + SUMP
+      SUMP = SUM
+ 1101 CONTINUE
+      VAR(IM,J,K) = VAR(IM,J,K) + 2.0*SUMP
+ 1100 CONTINUE
+C
+C
+C     NEXT ADD AN EXTRA CHANGES TO THE K = 1 and K = KM SURFACES
+C     INCLUDING THE I = 1 and IM surfaces BUT NOT THE J=1 and JM CORNERS.
+C
+C     FIRST K = 1
+C
+      DO 1120 J = 2,JMM1
+      SUMP        = QUART*(STORE(1,J-1,1) + STORE(1,J,1))
+      VAR(1,J,1)  = VAR(1,J,1) + 2.0*SUMP
+      DO 1121 I = 2,IMM1
+      SUM         = QUART*(STORE(I,J-1,1) + STORE(I,J,1))
+      VAR(I,J,1)  = VAR(I,J,1) + SUM + SUMP
+      SUMP        = SUM
+ 1121 CONTINUE
+      VAR(IM,J,1) = VAR(IM,J,1) + 2.0*SUMP
+ 1120 CONTINUE
+C
+C      NOW K = KM
+C
+      DO 1125 J  = 2,JMM1
+      SUMP         = QUART*(STORE(1,J-1,KMM1) + STORE(1,J,KMM1))
+      VAR(1,J,KM)  = VAR(1,J,KM) + 2.0*SUMP
+      DO 1126 I  = 2,IMM1
+      SUM          = QUART*(STORE(I,J-1,KMM1) + STORE(I,J,KMM1))
+      VAR(I,J,KM)  = VAR(I,J,KM) + SUM + SUMP
+      SUMP         = SUM
+ 1126 CONTINUE
+      VAR(IM,J,KM) = VAR(IM,J,KM) + 2.0*SUMP
+ 1125 CONTINUE
+C
+C     ADD THE CHANGES TO THE J = 1 and J = JM BOUNDARIES
+C     INCLUDING I = 1 and IM BUT NOT K=1 and K=KM.
+C
+C     FIRST J=1.
+C
+      DO 1130 K = 2,KMM1
+      SUMP        = QUART*(STORE(1,1,K) + STORE(1,1,K-1))
+      VAR(1,1,K)  = VAR(1,1,K) + 2.*SUMP
+      DO 1131 I = 2,IMM1
+      SUM         = QUART*(STORE(I,1,K) + STORE(I,1,K-1))
+      VAR(I,1,K)  = VAR(I,1,K) + SUM + SUMP
+      SUMP        = SUM
+ 1131 CONTINUE
+      VAR(IM,1,K) = VAR(IM,1,K) + 2.0*SUMP
+ 1130 CONTINUE
+C
+C     NOW J=JM.
+C
+      DO 1132 K = 2,KMM1
+      SUMP        = QUART*(STORE(1,JMM1,K) + STORE(1,JMM1,K-1))
+      VAR(1,JM,K) = VAR(1,JM,K) + 2.*SUMP
+      DO 1133 I = 2,IMM1
+      SUM         = QUART*(STORE(I,JMM1,K) + STORE(I,JMM1,K-1))
+      VAR(I,JM,K) = VAR(I,JM,K) + SUM + SUMP
+      SUMP        = SUM
+ 1133 CONTINUE
+      VAR(IM,JM,K) = VAR(IM,JM,K) + 2.0*SUMP
+ 1132 CONTINUE
+C
+C
+C     NOW UPDATE THE CORNER NODES: K=1,J=1.  K=KM,J=1. K=1,J=JM.  K=KM,J=JM.
+C
+C     FIRST THE K = 1,J = 1 CORNER.
+C
+      SUMP       = 0.5*STORE(1,1,1)
+      VAR(1,1,1) = VAR(1,1,1) + 2.*SUMP
+      DO 1140 I  = 2,IMM1
+      SUM        = 0.5*STORE(I,1,1)
+      VAR(I,1,1) = VAR(I,1,1) + SUM + SUMP
+      SUMP       =  SUM
+ 1140 CONTINUE
+      VAR(IM,1,1) = VAR(IM,1,1) + 2.*SUMP
+C
+C     NEXT THE K = 1,J = JM CORNER.
+C
+      SUMP        = 0.5*STORE(1,JMM1,1)
+      VAR(1,JM,1) = VAR(1,JM,1) + 2.*SUMP
+      DO 1150   I = 2,IMM1
+      SUM         = 0.5*STORE(I,JMM1,1)
+      VAR(I,JM,1) = VAR(I,JM,1) + SUM + SUMP
+      SUMP        =  SUM
+ 1150 CONTINUE
+      VAR(IM,JM,1) = VAR(IM,JM,1) + 2.*SUMP
+C
+C     NEXT THE K = KM,J = 1 CORNER.
+C
+      SUMP        = 0.5*STORE(1,1,KMM1)
+      VAR(1,1,KM) = VAR(1,1,KM) + 2.*SUMP
+      DO 1160   I = 2,IMM1
+      SUM         = 0.5*STORE(I,1,KMM1)
+      VAR(I,1,KM) = VAR(I,1,KM) + SUM + SUMP
+      SUMP        =  SUM
+ 1160 CONTINUE
+      VAR(IM,1,KM) = VAR(IM,1,KM) + 2.*SUMP
+C
+C     NEXT THE K = KM,J = JM CORNER.
+C
+      SUMP         = 0.5*STORE(1,JMM1,KMM1)
+      VAR(1,JM,KM) = VAR(1,JM,KM) + 2.*SUMP
+      DO 1170 I    = 2,IMM1
+      SUM          = 0.5*STORE(I,JMM1,KMM1)
+      VAR(I,JM,KM) = VAR(I,JM,KM) + SUM + SUMP
+      SUMP         =  SUM
+ 1170 CONTINUE
+      VAR(IM,JM,KM) = VAR(IM,JM,KM) + 2.*SUMP
+C
+C
+C    CALL THE SMOOTHING ROUTINE TO APPLY THE ARTIFICIAL VISCOSITY.
+C
+      CALL NUSMOOTH(NBLCK,VAR)
+C
+      RETURN
+      END
+C
+C******************************************************************************
+C****************************************************************************
+C
+      SUBROUTINE NUSMOOTH(NBLCK,VAR)
+C
+      INCLUDE 'commall-29'
+C
+      DIMENSION VAR(NIM,NJM,NKM),TEMP(MAXDIM)
+C
+C      APPLY COMBINED 2nd + 4th ORDER AXIAL SMOOTHING TO THE VARIABLE VAR( ).
+C      THIS ASSUMES UNIFORM GRID SPACING IN EACH DIRECTION.
+C
+      IM   = NI(NBLCK)
+      JM   = NJ(NBLCK)
+      KM   = NK(NBLCK)
+      IMM1 = IM-1
+      IMM2 = IM-2
+      JMM1 = JM-1
+      JMM2 = JM-2
+      KMM1 = KM-1
+      KMM2 = KM-2
+
+      SF   = SFAC
+      SF1  = 1. -SF
+      SFH  = 0.5*SF
+      SFF0 = SF*(0.5 - FACSEC/6)
+      SFF1 = SF*(0.5 + FACSEC/6)
+      SFF2 = SF*FACSEC/6
+
+C
+C     FIRST SMOOTH IN THE J DIRECTION.
+C
+      DO 100 K=1,KM
+      DO 100 I=1,IM
+
+      DO 105 J=1,JM
+  105 TEMP(J) = VAR(I,J,K)
+
+      DO 110 J=3,JMM2
+      VAR(I,J,K) = SF1*TEMP(J) 
+     &             + SFF1*(TEMP(J+1) + TEMP(J-1))
+     &             - SFF2*(TEMP(J-2) + TEMP(J+2))
+  110 CONTINUE
+C
+C    NOW SMOOTH THE SURFACES J=1, 2, JM-1  and J=JM.
+C
+      VAR(I,2,K)     = SF1*TEMP(2)   + SFF0*TEMP(1) + SFF1*TEMP(3)
+     &               + SFF2*(TEMP(2) - TEMP(4))
+      VAR(I,JMM1,K)  = SF1*TEMP(JMM1) + SFF0*TEMP(JM) + SFF1*TEMP(JMM2)
+     &               + SFF2*(TEMP(JMM1) - TEMP(JM-3))
+      VAR(I,1,K)   = TEMP(1) + SFH*(2.*TEMP(2) - TEMP(3) - TEMP(1))
+      VAR(I,JM,K)  = TEMP(JM) + SFH*(2.*TEMP(JMM1)-TEMP(JMM2)-TEMP(JM))
+  100 CONTINUE     
+C
+C  NOW SMOOTH "VAR" IN THE I DIRECTION.
+C
+      DO  300 K=1,KM
+      DO  300 J=1,JM
+
+      DO  305 I=1,IM
+  305 TEMP(I) = VAR(I,J,K)
+
+      DO  310 I=3,IMM2
+      VAR(I,J,K) = SF1*TEMP(I) 
+     &              + SFF1*(TEMP(I+1) + TEMP(I-1))
+     &              - SFF2*(TEMP(I+2) + TEMP(I-2))
+  310 CONTINUE
+C
+C     NEXT SMOOTH THE SURFACES I=1 and I=IM.
+C
+      VAR(2,J,K)     = SF1*TEMP(2)   + SFF0*TEMP(1) + SFF1*TEMP(3)
+     &               + SFF2*(TEMP(2) - TEMP(4))
+      VAR(IMM1,J,K)  = SF1*TEMP(IMM1) + SFF0*TEMP(IM) + SFF1*TEMP(IMM2)
+     &               + SFF2*(TEMP(IMM1) - TEMP(IM-3))
+      VAR(1,J,K)   = TEMP(1)  + SFH*(2.0*TEMP(2)-TEMP(3)-TEMP(1))
+      VAR(IM,J,K)  = TEMP(IM) + SFH*(2.*TEMP(IMM1)-TEMP(IMM2)-TEMP(IM))
+  300 CONTINUE
+C
+C     NOW SMOOTH "VAR" IN THE K DIRECTION.
+C     VARAIBLE "VAR" .
+C
+      DO 400 J=1,JM
+      DO 400 I=1,IM
+
+      DO 405 K=1,KM
+  405 TEMP(K)    = VAR(I,J,K)
+
+      DO 410 K=3,KMM2
+      VAR(I,J,K) = SF1*TEMP(K)
+     &           + SFF1*(TEMP(K+1) + TEMP(K-1))
+     &           - SFF2*(TEMP(K+2) + TEMP(K-2))
+  410 CONTINUE
+C
+C     NEXT SMOOTH K=1 and K = KM.
+C
+      VAR(I,J,2)     = SF1*TEMP(2)   + SFF0*TEMP(1) + SFF1*TEMP(3)
+     &               + SFF2*(TEMP(2) - TEMP(4))
+      VAR(I,J,KMM1)  = SF1*TEMP(KMM1) + SFF0*TEMP(KM) + SFF1*TEMP(KMM2)
+     &               + SFF2*(TEMP(KMM1) - TEMP(KM-3))
+      VAR(I,J,1)   = TEMP(1)  + SFH*(2.0*TEMP(2)-TEMP(3)-TEMP(1))
+      VAR(I,J,KM)  = TEMP(KM) + SFH*(2.0*TEMP(KMM1)-TEMP(KMM2)-TEMP(KM))
+  400 CONTINUE
+C
+C     SPECIAL SMOOTHING ALONG THE 12 EDGES OF A BLOCK.
+C
+      DO 360 K=1,KM
+      VAR(1,1,K) = SF1*VAR(1,1,K) + SFH*(VAR(1,2,K)+VAR(2,1,K))
+      VAR(IM,1,K)= SF1*VAR(IM,1,K)+ SFH*(VAR(IMM1,1,K)+VAR(IM,2,K))
+      VAR(IM,JM,K) = SF1*VAR(IM,JM,K) 
+     &             + SFH*(VAR(IM,JMM1,K)+VAR(IMM1,JM,K))
+      VAR(1,JM,K)= SF1*VAR(1,JM,K)+SFH*(VAR(2,JM,K)+VAR(1,JMM1,K))
+  360 CONTINUE
+C
+      DO 370 I=1,IM
+      VAR(I,1,1) = SF1*VAR(I,1,1) + SFH*(VAR(I,1,2)+VAR(I,2,1))
+      VAR(I,JM,1)= SF1*VAR(I,JM,1)+ SFH*(VAR(I,JM,2)+VAR(I,JMM1,1))
+      VAR(I,JM,KM) = SF1*VAR(I,JM,KM) +
+     &               SFH*(VAR(I,JM,KMM1)+VAR(I,JMM1,KM))
+      VAR(I,1,KM) = SF1*VAR(I,1,KM) + SFH*(VAR(I,2,KM)+VAR(I,1,KMM1))
+  370 CONTINUE
+C
+      DO 380 J=1,JM
+      VAR(1,J,1)  = SF1*VAR(1,J,1)  + SFH*(VAR(2,J,1)+VAR(1,J,2))
+      VAR(1,J,KM) = SF1*VAR(1,J,KM) + SFH*(VAR(2,J,KM)+VAR(1,J,KMM1))
+      VAR(IM,J,KM) = SF1*VAR(IM,J,KM)
+     &             + SFH*(VAR(IMM1,J,KM)+VAR(IM,J,KMM1)) 
+      VAR(IM,J,1) = SF1*VAR(IM,J,1) + SFH*(VAR(IMM1,J,1)+VAR(IM,J,2))
+  380 CONTINUE     
+
+C
+C
+C
+      RETURN
+      END
+C
+C********************************************************************************
+C  
+      SUBROUTINE BCONDS
+C
+      INCLUDE 'commall-29'
+C
+      CHARACTER*1 PTYPE
+C
+      
+      DO 10 NBLCK = 1,NBLOCKS
+      DO 10 NPTCH = 1,NPATCH(NBLCK)
+      IFDONE(NPTCH,NBLCK) = 0
+   10 CONTINUE
+C
+C
+C***************************************************************************  
+C*************************************************************************** 
+C       
+      DO 2000 NBLCK = 1,NBLOCKS
+C
+C
+      DO 1000 NPTCH = 1,NPATCH(NBLCK)
+C
+      PTYPE = PATCHTYPE(NPTCH,NBLCK)
+C
+C****************************************************************************
+C
+C     CALL INBCONDS IF AN INLET BOUNDARY.
+C   
+      IF(PTYPE.EQ.'I')  CALL INBCONDS(NPTCH,NBLCK)
+C
+C     CALL FIXEDBCONDS IF FIXED FLOW PROPERTIES ON THE BOUNDARY.
+C
+      IF(PTYPE.EQ.'F')  CALL FIXEDBCONDS(NPTCH,NBLCK)
+C
+C     END OF THE APPLICATION OF INLET BOUNDARY CONDITIONS.
+C
+C******************************************************************************
+C
+C      IF A PERIODIC BOUNDARY CALL PERBCONDS
+C      SKIP THIS IF THE PERIODICITY HAS ALREADY BEEN APPLIED, i.e. "IFDONE" = 1.
+C
+      IF(IFDONE(NPTCH,NBLCK).EQ.1)  GO TO 100
+C
+      IF(PTYPE.EQ.'P'.OR.PTYPE.EQ.'B')CALL PERBCONDS(NPTCH,NBLCK)
+C
+  100 CONTINUE
+C
+C*****************************************************************************
+C
+C     NOW APPLY A MIXING PLANE TYPE OF BOUNDARY CONDITION. THIS ASSUMES THAT THE 
+C     BOUNDARY IS AN "I" = CONSTANT SURFACE AND THAT THE MIXING IS IN THE "K"
+C     DIRECTION. THE GRID POINTS IN THE "J" DIRECTION MUST BE AT THE SAME SPANWISE
+C     LOCATION IN BOTH BLOCKS. THE PITCHWISE ("K")  EXTENT OF THE TWO BLOCKS NEED
+C     NOT BE THE SAME SO THAT DIFFERENT BLADE NUMBERS CAN BE USED IN EACH BLOCK.
+C
+C
+C      SKIP THIS IF THE TREATMENT HAS ALREADY BEEN APPLIED, i.e. "IFDONE" = 1.
+C
+      IF(IFDONE(NPTCH,NBLCK).EQ.1)  GO TO 200
+C
+      IF(PTYPE.EQ.'M') CALL MIXPLANE(NPTCH,NBLCK)
+C
+  200 CONTINUE
+C
+C*****************************************************************************
+C
+C      END OF LOOP APPLYING BOUNDARY CONDITIONS OVER ONE PATCH
+C
+ 1000 CONTINUE
+C
+C      END OF LOOP APPLYING BOUNDARY CONDITIONS OVER ONE BLOCK
+C
+ 2000 CONTINUE
+C
+C
+C*****************************************************************************
+C
+C      IF PTYPE = 'N' CALL INTERP_FACE TO INTERPOLATE BETWEEN FACES WHICH MAY
+C      HAVE DIFFERENT NUMBERS OF GRID POINTS AND NON-CONTIGUOUS GRIDS.
+C
+      IF(NINTFACE.NE.0) THEN
+      CALL INTERP_FACE
+      ENDIF
+C
+C*****************************************************************************
+C
+C     NOW CALL SLIDE_INTFACE TO INTERPOLATE ACROSS A SLIDING INTERFACE. PTYPE = "U" .
+C
+C 
+      IF(NSLIDEFACE.NE.0) THEN
+      CALL SLIDE_INTFACE 
+      ENDIF
+C 
+C
+C**************************************************************************
+C
+C
+C    END OF SUBROUTINE BCONDS
+C
+      RETURN
+      END
+C
+C**********************************************************************
+C
+      SUBROUTINE PLOTOUT
+C
+C**********************************************************************
+C
+C          WRITE THE GRID GEOMETRY TO VTK FILE FOR PARAVIEW
+C
+      INCLUDE 'commall-29'
+C
+C     JMB:   SUBROUTINE MODIFIED TO INCLUDE VTK WRITER
+c     KC485: FURTHER MODIFICATIONS MADE 
+c     RAS224:CORRECTION OF BUG.
+C
+C     EXTRA VARIABLES REQUIRED FOR THE TBLOCK-TO-VTK WRITER. JMB.
+      CHARACTER*45 VTUNAME
+      CHARACTER*45 PATH,PATH1
+      INTEGER IC, JC, KC, V211, V212, V221, V222	  
+      REAL Y(NIM,NJM,NKM,NBLOCKS),Z(NIM,NJM,NKM,NBLOCKS),
+     &     RO(NIM,NJM,NKM,NBLOCKS),
+     &     ROVX(NIM,NJM,NKM,NBLOCKS),ROVY(NIM,NJM,NKM,NBLOCKS),
+     &     ROVZ(NIM,NJM,NKM,NBLOCKS),ROE(NIM,NJM,NKM,NBLOCKS),
+     &     VX(NIM,NJM,NKM,NBLOCKS),VY(NIM,NJM,NKM,NBLOCKS),
+     &     VZ(NIM,NJM,NKM,NBLOCKS),EKE(NIM,NJM,NKM,NBLOCKS),
+     &     TSTAT(NIM,NJM,NKM,NBLOCKS),HSTAG(NIM,NJM,NKM,NBLOCKS),
+     &     PSTAT(NIM,NJM,NKM,NBLOCKS),MACH(NIM,NJM,NKM,NBLOCKS),
+     &     MWALL(NIM,NJM,NKM,NBLOCKS), MWALL_WING(NIM,NJM,NKM,NBLOCKS)
+C
+      OPEN(UNIT=8,FILE='flowout', FORM = 'unformatted')
+      OPEN(UNIT=9,FILE='gridout', FORM = 'unformatted')
+C	  
+      WRITE(8) NBLOCKS
+C
+      WRITE(8)  CP,GA
+C
+C     FIRST WRITE THE FLOW PROPERTIES TO UNIT 8.
+C
+      DO 300 NBLCK = 1,NBLOCKS
+C
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+C
+      WRITE(8) IM,JM,KM
+C
+      DO 30 I=1,IM
+      DO 30 J=1,JM
+      WRITE(8) (ROALL(I,J,K,NBLCK),   K=1,KM)
+      WRITE(8) (ROVXALL(I,J,K,NBLCK), K=1,KM)
+      WRITE(8) (ROVRALL(I,J,K,NBLCK), K=1,KM)
+      WRITE(8) (RORVTALL(I,J,K,NBLCK),K=1,KM)
+      WRITE(8) (ROEALL(I,J,K,NBLCK),  K=1,KM)
+      WRITE(8) (SPAREVAR(I,J,K,NBLCK), K=1,KM)
+   30 CONTINUE
+C
+      WRITE(8)  WROTBLK(NBLCK), TIMTOT
+      WRITE(8)  ILE(NBLCK),ITE(NBLCK)
+C
+  300 CONTINUE
+C
+      DO 50 NBLCK = 1,NBLOCKS
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+      DO 40 I=1,IM
+      DO 40 J=1,JM
+      WRITE(8) (SPAREVAR(I,J,K,NBLCK),K=1,KM)
+   40 CONTINUE
+   50 CONTINUE
+C
+C     NOW WRITE OUT THE ENTROPY GENERATION RATE FOR PLOTTING.
+C     
+      DO 70 NBLCK = 1,NBLOCKS
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+      DO 60 I=1,IM
+      DO 60 J=1,JM
+      WRITE(8)  (SPAREVAR(I,J,K,NBLCK),K=1,KM)
+   60 CONTINUE
+   70 CONTINUE
+      WRITE(8) SGEN_REF
+C
+      CLOSE(8)
+C
+C     NOW WRITE THE GRID GEOMETRY TO UNIT 9.
+C
+      WRITE(9) NBLOCKS
+C
+      DO 400 NBLCK =1,NBLOCKS
+C
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+C
+      WRITE(9) IM,JM,KM
+C 
+C     ADD THE MOVEMENT DUE TO ROTATION IF DOING AN UNSTEADY CALCULATION.
+C
+      ASHIFT  = 0.0
+      IF(NSLIDEFACE.GT.0) THEN
+      ANGROTN = WROTBLK(NBLCK)*TIMTOT
+      THSECT  = 6.283185*FRAC_ANN(1)
+      TSHIFT  = ANGROTN/THSECT
+      ASHIFT  = TSHIFT - IFIX(TSHIFT)
+      IF(ASHIFT.GT.0.5) ASHIFT  = ASHIFT - 1.0
+      IF(ASHIFT.LT.-0.5)ASHIFT  = ASHIFT + 1.0
+      ASHIFT  = ASHIFT*THSECT
+      ENDIF
+C 
+      DO 20 I=1,IM
+      DO 20 J=1,JM 
+      WRITE(9) (X(I,J,K,NBLCK), K=1,KM)
+      WRITE(9) (R(I,J,K,NBLCK), K=1,KM)
+      WRITE(9) ((RT(I,J,K,NBLCK) + R(I,J,K,NBLCK)*ASHIFT),K=1,KM)
+   20 CONTINUE
+C
+C
+  400 CONTINUE
+C
+      DO 401 NBLCK = 1,NBLOCKS
+      WRITE(9) 'NaN','NaN'
+  401 CONTINUE
+C
+      CLOSE(9)	  
+C     
+C     NOW PREPARE VTK FILE.
+C
+      DO 443 NBLCK=1,NBLOCKS	  
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+C	  
+C    NOW CALCULATE THE SECONDARY VARIABLES. NOTE THE SIGN CONVENTION OF
+C    THE Y AND Z COORDINATES. MODIFIED BY KC485.
+C
+        DO I = 1,IM
+          DO J = 1,JM
+            DO K = 1,KM
+              
+              THETA = RT(I,J,K,NBLCK)/R(I,J,K,NBLCK)
+              Y(I,J,K,NBLCK) = R(I,J,K,NBLCK)*COS(THETA)
+              Z(I,J,K,NBLCK) = R(I,J,K,NBLCK)*SIN(THETA)
+C
+              RO(I,J,K,NBLCK)   = ROALL(I,J,K,NBLCK)
+              ROVX(I,J,K,NBLCK) = ROVXALL(I,J,K,NBLCK)
+C             RAS224: In KC485 version this was a + for rovy and a - for rovz.
+C                     This was a bug and has now been corrected.
+              ROVY(I,J,K,NBLCK) = ROVRALL(I,J,K,NBLCK)*COS(THETA) -
+     &                            RORVTALL(I,J,K,NBLCK)*SIN(THETA)/
+     &                            R(I,J,K,NBLCK)
+              ROVZ(I,J,K,NBLCK) = ROVRALL(I,J,K,NBLCK)*SIN(THETA) + 
+     &                            RORVTALL(I,J,K,NBLCK)*COS(THETA)/
+     &                            R(I,J,K,NBLCK)
+              ROE(I,J,K,NBLCK)  = ROEALL(I,J,K,NBLCK)
+C
+              VX(I,J,K,NBLCK) = ROVX(I,J,K,NBLCK)/RO(I,J,K,NBLCK)
+              VY(I,J,K,NBLCK) = ROVY(I,J,K,NBLCK)/RO(I,J,K,NBLCK)
+              VZ(I,J,K,NBLCK) = ROVZ(I,J,K,NBLCK)/RO(I,J,K,NBLCK)
+C
+              EKE(I,J,K,NBLCK) = 0.5*(VX(I,J,K,NBLCK)*VX(I,J,K,NBLCK) + 
+     &                                VY(I,J,K,NBLCK)*VY(I,J,K,NBLCK) + 
+     &                                VZ(I,J,K,NBLCK)*VZ(I,J,K,NBLCK))
+              TSTAT(I,J,K,NBLCK) = (ROE(I,J,K,NBLCK)/RO(I,J,K,NBLCK) -
+     &                              EKE(I,J,K,NBLCK))/CV
+              HSTAG(I,J,K,NBLCK) = CP*TSTAT(I,J,K,NBLCK) + 
+     &                             EKE(I,J,K,NBLCK)
+              PSTAT(I,J,K,NBLCK) = RO(I,J,K,NBLCK)*RGAS*
+     &                             TSTAT(I,J,K,NBLCK)
+	          MACH(I,J,K,NBLCK)  = SQRT(2.*EKE(I,J,K,NBLCK)/
+     &                             (GA*RGAS*TSTAT(I,J,K,NBLCK))) 
+            ENDDO
+          ENDDO
+        ENDDO
+C
+C     NOW BEGIN VTK FILE GENERATION. JBM. MODIFIED BY KC485.
+C	  
+      VTUNAME= 'flow------'
+      WRITE(VTUNAME(6:6),'(I1)') NBLCK
+      WRITE(VTUNAME(7:10),'(A4)') '.vtu'
+C	  
+      OPEN(UNIT=40,FILE=VTUNAME, FORM = 'formatted')
+C
+      WRITE(40,*)'<VTKFile type="UnstructuredGrid">'
+      WRITE(40,*)'<UnstructuredGrid><Piece NumberOfPoints="',IM*JM*KM,
+     & '" NumberOfCells="',(IM-1)*(JM-1)*(KM-1),'">'
+      WRITE(40,*) '<Points>'
+      WRITE(40,*) '<DataArray type="Float32" NumberOfComponents="3">'
+C   
+      DO 21 K=1,KM
+      DO 21 J=1,JM
+      DO 21 I=1,IM
+      WRITE(40,*) X(I,J,K,NBLCK), Y(I,J,K,NBLCK), Z(I,J,K,NBLCK)
+   21 CONTINUE
+C
+      WRITE(40,*) '</DataArray>'
+      WRITE(40,*) '</Points>' 
+      WRITE(40,*) '<Cells>'
+      WRITE(40,*) '<DataArray type="Int32" Name="connectivity">'
+C
+      IC = 1
+      JC = 1
+      KC = 1
+C
+      DO 333 I=1,(IM-1)*(KM-1)*(JM-1)
+      V211 = (IM*JM)*(KC-1)+IM*(JC-1)+IC
+      V212 = (IM*JM)*KC+IM*(JC-1)+IC
+      V221 = (V211+IM)
+      V222 = (V212+IM)
+      WRITE(40,*) (V211-1),V211,V212,(V212-1),(V221-1),
+     &            V221,V222,(V222-1)
+      IF(MOD(IC,(IM-1)).EQ.0) THEN
+      IC = 1
+      IF(MOD(JC,(JM-1)).EQ.0) THEN
+      JC = 1
+      KC = KC + 1
+      ELSE
+      JC = JC + 1
+      ENDIF
+      ELSE
+      IC = IC + 1;
+      ENDIF
+  333 CONTINUE
+C      
+      WRITE(40,*) '</DataArray>'
+      WRITE(40,*) '<DataArray type="Int32" Name="offsets">'
+      DO 334 I=1,(IM-1)*(KM-1)*(JM-1)
+      WRITE(40,*) I*8
+  334 CONTINUE
+      WRITE(40,*) '</DataArray>'
+C
+      WRITE(40,*) '<DataArray type="Int32" Name="types">'
+      DO 335 I=1,(IM-1)*(KM-1)*(JM-1)
+      WRITE(40,*) 12
+  335 CONTINUE
+      WRITE(40,*) '</DataArray>'
+      WRITE(40,*) '</Cells>'
+C      
+      WRITE(40,*) '<PointData>'  
+C
+C     NOW WRITE OUT FLOW VARIABLES. MODIFIED BY KC485.
+C
+C density
+C	  
+      WRITE(40,*) '<DataArray Name="ro" type="Float32"', 
+     & ' NumberOfComponents="1">'
+      DO K=1,KM
+       DO J=1,JM
+         DO I=1,IM 
+      WRITE(40,*) RO(I,J,K,NBLCK)
+         ENDDO
+       ENDDO
+      ENDDO  	  
+C    
+C x-velocity
+C	  
+      WRITE(40,*) '</DataArray>'
+C
+      WRITE(40,*) '<DataArray Name="Vx" type="Float32"', 
+     & ' NumberOfComponents="1">'
+      DO K=1,KM
+       DO J=1,JM
+         DO I=1,IM 
+      WRITE(40,*) VX(I,J,K,NBLCK)
+         ENDDO
+       ENDDO
+      ENDDO
+C    
+C y-velocity
+C	  
+      WRITE(40,*) '</DataArray>'
+C
+      WRITE(40,*) '<DataArray Name="Vy" type="Float32"', 
+     & ' NumberOfComponents="1">'
+      DO K=1,KM
+       DO J=1,JM
+         DO I=1,IM 
+      WRITE(40,*) VY(I,J,K,NBLCK)
+         ENDDO
+       ENDDO
+      ENDDO 	  
+C
+C z-velocity
+C	  
+      WRITE(40,*) '</DataArray>'
+C
+      WRITE(40,*) '<DataArray Name="Vz" type="Float32"', 
+     & ' NumberOfComponents="1">'
+      DO K=1,KM
+       DO J=1,JM
+         DO I=1,IM 
+      WRITE(40,*) VZ(I,J,K,NBLCK)
+         ENDDO
+       ENDDO
+      ENDDO
+C
+C 3 component velocity vector (cartesian)
+C	  
+      WRITE(40,*) '</DataArray>'
+C
+      WRITE(40,*) '<DataArray Name="V" type="Float32" ', 
+     &            'NumberOfComponents="3">'
+      DO K=1,KM
+          DO J=1,JM
+              DO I=1,IM
+        WRITE(40,*)VX(I,J,K,NBLCK),VY(I,J,K,NBLCK),VZ(I,J,K,NBLCK)
+              ENDDO
+          ENDDO
+      ENDDO
+C
+C static pressure
+C	  
+      WRITE(40,*) '</DataArray>'
+C
+      WRITE(40,*) '<DataArray Name="p" type="Float32"', 
+     & ' NumberOfComponents="1">'
+      DO K=1,KM
+       DO J=1,JM
+         DO I=1,IM 
+      WRITE(40,*) PSTAT(I,J,K,NBLCK)
+         ENDDO
+       ENDDO
+      ENDDO
+C
+C static temperature
+C	  
+      WRITE(40,*) '</DataArray>'
+C
+      WRITE(40,*) '<DataArray Name="T" type="Float32"', 
+     & ' NumberOfComponents="1">'
+      DO K=1,KM
+       DO J=1,JM
+         DO I=1,IM 
+      WRITE(40,*) TSTAT(I,J,K,NBLCK)
+         ENDDO
+       ENDDO
+      ENDDO
+C
+C mach number
+C	  
+      WRITE(40,*) '</DataArray>'
+C
+      WRITE(40,*) '<DataArray Name="Mach" type="Float32"', 
+     & ' NumberOfComponents="1">'
+      DO K=1,KM
+       DO J=1,JM
+         DO I=1,IM 
+      WRITE(40,*) MACH(I,J,K,NBLCK)
+         ENDDO
+       ENDDO
+      ENDDO
+C
+      DO K = 1,KM
+        DO J = 1,JM
+          DO I = 1,IM
+            MWALL(I,J,K,NBLCK) = 0.0
+            IF (I.eq.1) THEN
+              MWALL(I,J,K,NBLCK) = 1.0-MWALLI1(J,K,NBLCK)
+            ENDIF
+            IF (I.eq.IM) THEN
+              MWALL(I,J,K,NBLCK) = 1.0-MWALLIM(J,K,NBLCK)
+            ENDIF
+C            IF (J.eq.1) THEN
+C              MWALL(I,J,K,NBLCK) = 1.0-MWALLJ1(I,K,NBLCK)
+C            ENDIF
+            IF (J.eq.JM) THEN
+              MWALL(I,J,K,NBLCK) = 1.0-MWALLJM(I,K,NBLCK)
+            ENDIF
+            IF (K.eq.1) THEN
+              MWALL(I,J,K,NBLCK) = 1.0-MWALLK1(I,J,NBLCK)
+            ENDIF
+            IF (K.eq.KM) THEN
+              MWALL(I,J,K,NBLCK) = 1.0-MWALLKM(I,J,NBLCK)
+            ENDIF
+          ENDDO
+        ENDDO
+      ENDDO
+C
+      DO K = 1,KM
+        DO J = 1,JM
+          DO I = 1,IM
+            MWALL_WING(I,J,K,NBLCK) = 0.0
+            IF (K.eq.1) THEN
+              IF (NBLCK.eq.2) THEN
+              MWALL_WING(I,J,K,NBLCK) = 1.0-MWALLK1(I,J,NBLCK)
+              ENDIF
+            ENDIF
+            IF (K.eq.KM) THEN
+              IF (NBLCK.eq.1) THEN
+              MWALL_WING(I,J,K,NBLCK) = 1.0-MWALLKM(I,J,NBLCK)
+              ENDIF
+            ENDIF
+          ENDDO
+        ENDDO
+      ENDDO
+C
+C mwall
+C
+      WRITE(40,*) '</DataArray>'
+C
+      WRITE(40,*) '<DataArray Name="mwall" type="Float32"', 
+     & ' NumberOfComponents="1">'
+      DO K=1,KM
+       DO J=1,JM
+         DO I=1,IM 
+      WRITE(40,*) MWALL(I,J,K,NBLCK)
+         ENDDO
+       ENDDO
+      ENDDO
+C
+C mwall for wing
+C
+      WRITE(40,*) '</DataArray>'
+C
+      WRITE(40,*) '<DataArray Name="mwall_wing" type="Float32"', 
+     & ' NumberOfComponents="1">'
+      DO K=1,KM
+       DO J=1,JM
+         DO I=1,IM 
+      WRITE(40,*) MWALL_WING(I,J,K,NBLCK)
+         ENDDO
+       ENDDO
+      ENDDO
+C
+      WRITE(40,*) '</DataArray>'
+      WRITE(40,*) '</PointData>'
+      WRITE(40,*) '</Piece>'
+      WRITE(40,*) '</UnstructuredGrid>'
+      WRITE(40,*) '</VTKFile>'
+      CLOSE(40)
+ 443  CONTINUE
+C
+      RETURN
+      END
+C
+C**********************************************************************
+C
+      SUBROUTINE INTP(N,XN,YN,X,Y)
+C
+C      THIS SUBROUTINE INTERPOLATES IN THE GIVEN TABLE OF YN AS A
+C      FUNCTION OF XN TO FIND THE VALUE OF Y AT THE INPUT VALUE
+C      OF X.
+C
+      DIMENSION XN(N),YN(N)
+      SPAN=XN(N)-XN(1)
+      Y=0.
+      L=1
+      NM=N
+      IF(N.LT.4) GO TO 8
+      NM=4
+    4 IF(SPAN.GT.0.0.AND.X.LT.XN(L)) GO TO 5
+      IF(SPAN.LT.0.0.AND.X.GT.XN(L)) GO TO 5
+      IF(L.EQ.N) GO TO 3
+      L=L+1
+      GO TO 4
+    5 IF(L.GT.2) GO TO 6
+      L=1
+      GO TO 8
+    6 IF(L.NE.N) GO TO 7
+    3 L=N-3
+      GO TO 8
+    7 L=L-2
+    8 DO 11 L1=1,NM
+      CO=1
+      DO 10 L2=1,NM
+      IF(L1.EQ.L2) GO TO 9
+      TEMP=(X-XN(L+L2-1))/(XN(L+L1-1)-XN(L+L2-1))
+      GO TO 10
+    9 TEMP=1
+   10 CO=CO*TEMP
+   11 Y=Y+CO*YN(L+L1-1)
+      RETURN
+      END
+C
+C*************************************************************************************
+C
+       SUBROUTINE LININT(NPOINTS,X,Y,XARG,YANS)
+C
+C      THIS SUBROUTINE INTERPOLATES IN THE GIVEN TABLE OF YN AS A
+C      FUNCTION OF X TO FIND THE VALUE OF Y AT THE INPUT VALUE
+C      OF X = XARG.
+C
+C      THIS VERSION USES LINEAR INTERPOLATION TO AVOID ANY POSSIBLE
+C      PROBLEMS WITH OVERSHOOTS OR UNDERSHOOTS.
+C
+      DIMENSION X(NPOINTS),Y(NPOINTS)
+C
+      IF (X(1).GT.XARG) THEN
+      YANS = Y(1) + (XARG-X(1))*(Y(2)-Y(1))/(X(2)-X(1))
+      ELSE
+      N=2
+   10 CONTINUE
+      IF(X(N).GT.XARG) GO TO 20
+      N=N+1
+      IF(N.GT.NPOINTS) GO TO 30
+      GO TO 10
+   20 YANS = Y(N) + (XARG-X(N))*(Y(N-1)-Y(N))/(X(N-1)-X(N))
+      GO TO 40
+   30 YANS = Y(NPOINTS) + (XARG-X(NPOINTS))*(Y(NPOINTS)-Y(NPOINTS-1))/
+     & (X(NPOINTS)-X(NPOINTS-1))
+   40 CONTINUE
+C
+      ENDIF
+C
+      RETURN
+      END
+C
+C******************************************************************************
+C
+      SUBROUTINE GRID_PATCH(NPTCH,NBLCK)
+C
+C
+C     THIS SUBROUTINE GENERATES A GRID ON A PATCH AND THEN CALLS MATCH_PATCH TO
+C     MATCH THE MAIN GRID ON THE CURRENT BLOCK TO THE GRID ON THE PATCH.
+C
+      INCLUDE 'commall-29'
+C
+      DIMENSION  INDX(NMATRIX)
+C
+      DOUBLE PRECISION A(NMATRIX,NMATRIX)
+C
+C
+C
+      WRITE(6,*) ' ENTERED GRID_PATCH '
+C
+      IM     = NI(NBLCK)
+      JM     = NJ(NBLCK)
+      KM     = NK(NBLCK)
+      IMM1   = IM-1
+      JMM1   = JM-1
+      KMM1   = KM-1
+C
+      IS     =  IPATCHS(NPTCH,NBLCK)
+      IE     =  IPATCHE(NPTCH,NBLCK)
+      JS     =  JPATCHS(NPTCH,NBLCK)
+      JE     =  JPATCHE(NPTCH,NBLCK)
+      KS     =  KPATCHS(NPTCH,NBLCK)
+      KE     =  KPATCHE(NPTCH,NBLCK)
+C
+C     THE "NPATCHIN" POINTS ON THE PATCH BOUNDARY HAVE ALREADY BEEN READ IN
+C     AS INPUT DATA OR GENERATED BY CALLING SUBROUTINE "GET_PATCH".
+C     NOW CHANGE THEIR ARRAYS TO ONE-DIMENSIONAL ARRAYS.
+C
+      NPOINTS = NPATCHIN(NPTCH,NBLCK)
+      EXP     =  EXPATIN(NPTCH,NBLCK)
+C
+C
+      IPMAX = -1000000
+      IPMIN =  1000000
+      JPMAX = -1000000
+      JPMIN =  1000000
+      KPMAX = -1000000
+      KPMIN =  1000000 
+C     
+      DO 50 N=1,NPOINTS
+      IPIN(N)  = IPATIN(NPTCH,N,NBLCK)
+      JPIN(N)  = JPATIN(NPTCH,N,NBLCK)
+      KPIN(N)  = KPATIN(NPTCH,N,NBLCK)
+      XPIN(N)  = XPATIN(NPTCH,N,NBLCK)
+      RPIN(N)  = RPATIN(NPTCH,N,NBLCK)
+      RTPIN(N) = RTPATIN(NPTCH,N,NBLCK)
+      IF(IPIN(N).LE.IPMIN) IPMIN = IPIN(N)
+      IF(IPIN(N).GE.IPMAX) IPMAX = IPIN(N)
+      IF(JPIN(N).LE.JPMIN) JPMIN = JPIN(N)
+      IF(JPIN(N).GE.JPMAX) JPMAX = JPIN(N)
+      IF(KPIN(N).LE.KPMIN) KPMIN = KPIN(N)
+      IF(KPIN(N).GE.KPMAX) KPMAX = KPIN(N)
+   50 CONTINUE
+C
+C
+C     CHECK THAT THE PATCH FACE IS COMPATIBLE.
+C
+      IF(PATCHTYPE(NPTCH,NBLCK).NE.'N') THEN
+
+      IF((IPMAX.EQ.IPMIN).AND.(IE.NE.IS)) WRITE(6,*) 'WARNING !!!
+     & I   PATCH FACE NOT COMPATIBLE IN GRID_PATCH'
+      IF((JPMAX.EQ.JPMIN).AND.(JE.NE.JS)) WRITE(6,*) 'WARNING !!!
+     & J    PATCH FACE NOT COMPATIBLE IN GRID_PATCH'
+      IF((KPMAX.EQ.KPMIN).AND.(KE.NE.KS)) WRITE(6,*) 'WARNING !!!
+     & K    PATCH FACE NOT COMPATIBLE IN GRID_PATCH'
+C
+C
+      ENDIF
+C
+C
+C     SCALE THE INPUT IPIN,JPIN,KPIN  VALUES TO FIT THE RANGE OF THE PATCH.
+C
+C
+      DO 51 N=1,NPOINTS
+      IF(IPMAX.EQ.IPMIN) THEN
+      RIPIN(N) = IS
+      ELSE
+      RIPIN(N) = IS + FLOAT(IPIN(N)-IPMIN)/FLOAT(IPMAX-IPMIN)*(IE-IS)
+      ENDIF
+      IF(JPMAX.EQ.JPMIN) THEN
+      RJPIN(N) = JS
+      ELSE
+      RJPIN(N) = JS + FLOAT(JPIN(N)-JPMIN)/FLOAT(JPMAX-JPMIN)*(JE-JS)
+      ENDIF
+      IF(KPMAX.EQ.KPMIN) THEN
+      RKPIN(N) = KS
+      ELSE
+      RKPIN(N) = KS + FLOAT(KPIN(N)-KPMIN)/FLOAT(KPMAX-KPMIN)*(KE-KS)
+      ENDIF
+   51 CONTINUE
+C     
+C 
+C
+      IRANGE = IE - IS
+      IF(IS.EQ.IE) IRANGE = 1
+      JRANGE = JE - JS
+      IF(JS.EQ.JE) JRANGE = 1
+      KRANGE = KE - KS
+      IF(KS.EQ.KE) KRANGE = 1
+C
+C
+      DO 500 N1=1,NPOINTS
+      VINODE = RIPIN(N1)
+      VJNODE = RJPIN(N1)
+      VKNODE = RKPIN(N1) 
+C
+      DO 600 N2=1,NPOINTS 
+      VIPOINT = RIPIN(N2)
+      VJPOINT = RJPIN(N2)
+      VKPOINT = RKPIN(N2)
+C
+C     FIRST SET FACI
+C
+      IF(IS.EQ.IE) THEN
+      FACI = 1.0
+      ELSE
+C      
+      FINODE  = (VINODE -IS)/IRANGE
+      FIPOINT = (VIPOINT-IS)/IRANGE
+      ABSNODE = ABS(FINODE)
+C
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FIPOINT.LT.FINODE)
+     &   FACI=(1.0 - ((FINODE-FIPOINT)/FINODE)**EXP)
+      IF(FIPOINT.GE.FINODE)
+     &   FACI=(1.0 - ((FIPOINT-FINODE)/(1.-FINODE))**EXP)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACI = (IE-VIPOINT)/IRANGE
+      IF(ABSNODE.GT.0.9999) FACI = (VIPOINT-IS)/IRANGE
+      ENDIF
+C
+      ENDIF
+C
+C     NEXT SET FACJ
+C
+      IF(JS.EQ.JE) THEN
+      FACJ = 1.0
+      ELSE 
+C 
+      FJNODE  = (VJNODE -JS)/JRANGE
+      FJPOINT = (VJPOINT-JS)/JRANGE
+      ABSNODE = ABS(FJNODE)
+C
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FJPOINT.LT.FJNODE)
+     &   FACJ=(1.0 - ((FJNODE-FJPOINT)/FJNODE)**EXP)
+      IF(FJPOINT.GE.FJNODE)
+     &   FACJ=(1.0 - ((FJPOINT-FJNODE)/(1.-FJNODE))**EXP)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACJ = (JE-VJPOINT)/JRANGE
+      IF(ABSNODE.GT.0.9999) FACJ = (VJPOINT-JS)/JRANGE
+      ENDIF
+C
+      ENDIF
+C
+C    NEXT SET FACK
+C
+      IF(KS.EQ.KE) THEN
+      FACK = 1.0
+      ELSE
+C
+      FKNODE  = (VKNODE -KS)/KRANGE
+      FKPOINT = (VKPOINT-KS)/KRANGE
+      ABSNODE = ABS(FKNODE)
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FKPOINT.LT.FKNODE)
+     &   FACK=(1.0 - ((FKNODE-FKPOINT)/FKNODE)**EXP)
+      IF(FKPOINT.GE.FKNODE)
+     &   FACK=(1.0 - ((FKPOINT-FKNODE)/(1.-FKNODE))**EXP)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACK = (KE-VKPOINT)/KRANGE
+      IF(ABSNODE.GT.0.9999) FACK = (VKPOINT-KS)/KRANGE
+      ENDIF
+C
+      ENDIF
+C
+C     SET THE INFLUENCE COEFFICIENT A(I,J)
+C
+      A(N2,N1) = FACI*FACJ*FACK
+C 
+C
+  600 CONTINUE
+  500 CONTINUE 
+C
+C 
+C   perform lower-upper decomposition of matrix 
+C  
+      CALL LUDCMP(A,NPOINTS,NMATRIX,INDX,DD,NERR)
+C 
+C   perform lower-upper back substitution. 
+C 
+      CALL LUBKSB(A,NPOINTS,NMATRIX,INDX,XPIN)
+C
+C
+      CALL LUBKSB(A,NPOINTS,NMATRIX,INDX,RPIN)
+C
+C
+      CALL LUBKSB(A,NPOINTS,NMATRIX,INDX,RTPIN) 
+C
+C
+C
+C    NOW INTERPOLATE TO FIND THE GRID POINTS ON THE PATCH.
+C
+
+      DO 210 I = IS,IE
+      VIPOINT = I 
+C  
+      DO 200 J = JS,JE
+      VJPOINT = J
+C
+      DO 190 K = KS,KE
+      VKPOINT = K
+C 
+C
+      ANSX = 0.0
+      ANSY = 0.0
+      ANSZ = 0.0
+C
+      DO 230 N=1,NPOINTS
+C
+      VINODE = RIPIN(N) 
+      VJNODE = RJPIN(N) 
+      VKNODE = RKPIN(N) 
+C
+      IF(IS.EQ.IE) THEN
+      FACI = 1.0
+      ELSE
+C
+      FINODE  = (VINODE -IS)/IRANGE
+      FIPOINT = (VIPOINT-IS)/IRANGE
+      ABSNODE = ABS(FINODE)
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FIPOINT.LT.FINODE)
+     &   FACI=(1.0 - ((FINODE-FIPOINT)/FINODE)**EXP)
+      IF(FIPOINT.GE.FINODE)
+     &   FACI=(1.0 - ((FIPOINT-FINODE)/(1.-FINODE))**EXP)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACI = (IE-VIPOINT)/IRANGE
+      IF(ABSNODE.GT.0.9999) FACI = (VIPOINT-IS)/IRANGE
+      ENDIF
+C  
+      ENDIF
+C
+C
+      IF(JS.EQ.JE) THEN
+      FACJ = 1.0
+      ELSE
+C
+      FJNODE  = (VJNODE -JS)/JRANGE
+      FJPOINT = (VJPOINT-JS)/JRANGE
+      ABSNODE = ABS(FJNODE)
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FJPOINT.LT.FJNODE)
+     &   FACJ=(1.0 - ((FJNODE-FJPOINT)/FJNODE)**EXP)
+      IF(FJPOINT.GE.FJNODE)
+     &   FACJ=(1.0 - ((FJPOINT-FJNODE)/(1.-FJNODE))**EXP)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACJ = (JE-VJPOINT)/JRANGE
+      IF(ABSNODE.GT.0.9999) FACJ = (VJPOINT-JS)/JRANGE
+      ENDIF
+C
+      ENDIF
+C
+      IF(KS.EQ.KE) THEN
+      FACK = 1.0
+      ELSE 
+C
+      FKNODE  = (VKNODE -KS)/KRANGE
+      FKPOINT = (VKPOINT-KS)/KRANGE
+      ABSNODE = ABS(FKNODE)
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FKPOINT.LT.FKNODE)
+     &   FACK=(1.0 - ((FKNODE-FKPOINT)/FKNODE)**EXP)
+      IF(FKPOINT.GE.FKNODE)
+     &   FACK=(1.0 - ((FKPOINT-FKNODE)/(1.-FKNODE))**EXP)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACK = (KE-VKPOINT)/KRANGE
+      IF(ABSNODE.GT.0.9999) FACK = (VKPOINT-KS)/KRANGE
+      ENDIF
+C
+      ENDIF
+C
+C
+C    SUM THE SERIES TO FIND THE COORDINATES OF THE NEW GRID POINTS.
+C
+      ANSX = ANSX + FACI*FACJ*FACK*XPIN(N)
+      ANSY = ANSY + FACI*FACJ*FACK*RPIN(N)
+      ANSZ = ANSZ + FACI*FACJ*FACK*RTPIN(N)
+C
+C      
+  230 CONTINUE
+C
+C     SAVE THE NEW GRID POINTS ON THE PATCH AS STORE1, STORE2, STORE3.
+C
+      STORE1(I,J,K)  = ANSX 
+      STORE2(I,J,K)  = ANSY 
+      STORE3(I,J,K)  = ANSZ
+C
+  190 CONTINUE
+  200 CONTINUE
+  210 CONTINUE
+C
+C
+C
+C    ALL THE GRID POINTS ON THE PATCH HAVE NOW BEEN SET.
+C    CALL MATCH_PATCH TO IMPOSE THIS PATCH ON THE MAIN GRID OF THE BLOCK.
+C
+      ICALL = 1
+      CALL MATCH_PATCH(NPTCH,ICALL,NBLCK)
+C
+      WRITE(6,*) ' LEAVING SUBROUTINE gridpatch.  '
+C
+      RETURN
+      END
+C
+C***********************************************************************
+C
+      SUBROUTINE GET_PATCH(NPTCH,NBLCK)
+C
+      INCLUDE 'commall-29'
+C
+      CHARACTER*2 NXI,NXJ,NXK
+C
+C     THIS SUBROUTINE COPIES THE PATCH COORDINATES AND INDICES FROM THE 
+C     ADJACENT PATCH AND TURNS THEM INTO A FORM THAT CAN BE USED TO CALL
+C     "GRID_PATCH" IN ORDER TO GENERATE A MATCHING PATCH WITH DIFFERENT
+C     RANGES OF GRID INDICES ON THE CURRENT PATCH. 
+C
+      WRITE(6,*)  ' STARTING GET_PATCH. '
+C
+      IM     =  NI(NBLCK)
+      JM     =  NJ(NBLCK)
+      KM     =  NK(NBLCK)
+      NXBLCK =  NEXT_BLOCK(NPTCH,NBLCK)
+      NXPTCH =  NEXT_PATCH(NPTCH,NBLCK)
+C
+      IS     =  IPATCHS(NPTCH,NBLCK)
+      IE     =  IPATCHE(NPTCH,NBLCK) 
+      JS     =  JPATCHS(NPTCH,NBLCK)
+      JE     =  JPATCHE(NPTCH,NBLCK)
+      KS     =  KPATCHS(NPTCH,NBLCK)
+      KE     =  KPATCHE(NPTCH,NBLCK)
+C
+      NXIS   =  IPATCHS(NXPTCH,NXBLCK)
+      NXIE   =  IPATCHE(NXPTCH,NXBLCK) 
+      NXJS   =  JPATCHS(NXPTCH,NXBLCK)
+      NXJE   =  JPATCHE(NXPTCH,NXBLCK)
+      NXKS   =  KPATCHS(NXPTCH,NXBLCK)
+      NXKE   =  KPATCHE(NXPTCH,NXBLCK)
+C
+      NXI     =  NEXT_I(NPTCH,NBLCK)
+      NXJ     =  NEXT_J(NPTCH,NBLCK)
+      NXK     =  NEXT_K(NPTCH,NBLCK)
+C
+C     SET THE COORDINATES AND INDICES OF THE PATCH TO BE IN THE FORM
+C     REQUIRED BY GRID_PATCH.
+C
+      NP  = 0
+C
+      IF(IFCHECK.EQ.1) THEN
+      WRITE(6,*) ' BLOCK NUMBER', NBLCK,'PATCH No',NPTCH
+      WRITE(6,*) '    GRID POINTS FOUND BY GET_PATCH '
+      WRITE(6,*) '   N    I    J    K          X         R         RT'  
+      ENDIF 
+C
+      DO 10 K = NXKS,NXKE
+      DO 10 J = NXJS,NXJE
+      DO 10 I = NXIS,NXIE
+
+C     SKIP ALL POINTS NOT ON THE PATCH BOUNDARIES.
+
+      IF(  (NXJS.EQ.NXJE).AND.((K.NE.NXKS).AND.(K.NE.NXKE))
+     & .AND.((I.NE.NXIS).AND.(I.NE.NXIE))  )   GO TO 10
+C
+      IF(  (NXIS.EQ.NXIE).AND.((K.NE.NXKS).AND.(K.NE.NXKE))
+     & .AND.((J.NE.NXJS).AND.(J.NE.NXJE))   )  GO TO 10
+C
+      IF(  (NXKS.EQ.NXKE).AND.((I.NE.NXIS).AND.(I.NE.NXIE))
+     & .AND.((J.NE.NXJS).AND.(J.NE.NXJE))   )  GO TO 10
+C
+C
+      NP = NP + 1
+C
+      IPATIN(NPTCH,NP,NBLCK)  =  IS
+      JPATIN(NPTCH,NP,NBLCK)  =  JS
+      KPATIN(NPTCH,NP,NBLCK)  =  KS
+      XPATIN(NPTCH,NP,NBLCK)  =  X(I,J,K,NXBLCK)
+      RPATIN(NPTCH,NP,NBLCK)  =  R(I,J,K,NXBLCK)
+      RTPATIN(NPTCH,NP,NBLCK) = RT(I,J,K,NXBLCK)
+
+      IF(NXI.EQ.'+J'.OR.NXI.EQ.'+j'.OR.NXI.EQ.'-J'.OR.NXI.EQ.'-j')
+     &       IPATIN(NPTCH,NP,NBLCK) = J
+      IF(NXI.EQ.'+K'.OR.NXI.EQ.'+k'.OR.NXI.EQ.'-K'.OR.NXI.EQ.'-k')
+     &       IPATIN(NPTCH,NP,NBLCK) = K
+      IF(NXI.EQ.'+I'.OR.NXI.EQ.'+i'.OR.NXI.EQ.'-I'.OR.NXI.EQ.'-i')
+     &       IPATIN(NPTCH,NP,NBLCK) = I
+C
+      IF(NXJ.EQ.'+J'.OR.NXJ.EQ.'+j'.OR.NXJ.EQ.'-J'.OR.NXJ.EQ.'-j')
+     &       JPATIN(NPTCH,NP,NBLCK) = J
+      IF(NXJ.EQ.'+K'.OR.NXJ.EQ.'+k'.OR.NXJ.EQ.'-K'.OR.NXJ.EQ.'-k')
+     &       JPATIN(NPTCH,NP,NBLCK) = K
+      IF(NXJ.EQ.'+I'.OR.NXJ.EQ.'+i'.OR.NXJ.EQ.'-I'.OR.NXJ.EQ.'-i')
+     &       JPATIN(NPTCH,NP,NBLCK) = I
+
+      IF(NXK.EQ.'+K'.OR.NXK.EQ.'+k'.OR.NXK.EQ.'-K'.OR.NXK.EQ.'-k')
+     &       KPATIN(NPTCH,NP,NBLCK) = K
+      IF(NXK.EQ.'+J'.OR.NXK.EQ.'+j'.OR.NXK.EQ.'-J'.OR.NXK.EQ.'-j')
+     &       KPATIN(NPTCH,NP,NBLCK) = J
+      IF(NXK.EQ.'+I'.OR.NXK.EQ.'+i'.OR.NXK.EQ.'-I'.OR.NXK.EQ.'-i')
+     &       KPATIN(NPTCH,NP,NBLCK) = I
+C
+C
+      IF(IFCHECK.EQ.1) THEN     
+      WRITE(6,11) NP, IPATIN(NPTCH,NP,NBLCK),JPATIN(NPTCH,NP,NBLCK),
+     &                KPATIN(NPTCH,NP,NBLCK),XPATIN(NPTCH,NP,NBLCK),
+     &                RPATIN(NPTCH,NP,NBLCK),RTPATIN(NPTCH,NP,NBLCK)
+      ENDIF
+C 
+C
+   10 CONTINUE
+C
+C
+      NPATCHIN(NPTCH,NBLCK)   = NP
+      EXPATIN(NPTCH,NBLCK)    = 1.25
+C
+   11 FORMAT(4I5,T25,3F10.3)
+C
+      RETURN
+      END
+C
+C************************************************************************
+C
+      SUBROUTINE MATCH_PATCH(NPTCH,ICALL,NBLCK)
+C
+      INCLUDE 'commall-29'
+C
+      DIMENSION FACJ(NJM),FACK(NKM),FACI(NIM)
+C
+      CHARACTER*1  PTYPE
+C
+C
+C      IF ICALL = 0 : MATCH THE GRID TO THE GRID ON THE ADJACENT PATCH 
+C                     OF A DIFFERENT BLOCK.
+C
+C      IF ICALL = 1 : MATCH THE GRID TO THE PATCH GENERATED ON THE CURRENT 
+C                     FACE OF THE CURRENT BLOCK BY SUBROUTINE GRID_PATCH.
+C
+      POWER = 1.0
+C
+      IM     = NI(NBLCK)
+      JM     = NJ(NBLCK)
+      KM     = NK(NBLCK)
+C
+      IF(ICALL.EQ.0) THEN
+           NXBLCK  =  NEXT_BLOCK(NPTCH,NBLCK)
+           NXPTCH  =  NEXT_PATCH(NPTCH,NBLCK)
+      ELSE
+           NXBLCK  = NBLCK
+           NXPTCH  = NPTCH
+      ENDIF
+C
+      PTYPE   =  PATCHTYPE(NPTCH,NBLCK)
+      NMOVE   =  NMATCH_ON(NPTCH,NBLCK)
+      NPERP   =  NMATCH_OFF(NPTCH,NBLCK)
+      FMOVE   =  FRACSHIFT(NPTCH,NBLCK)
+C
+      IS     =  IPATCHS(NPTCH,NBLCK)
+      IE     =  IPATCHE(NPTCH,NBLCK) 
+      JS     =  JPATCHS(NPTCH,NBLCK)
+      JE     =  JPATCHE(NPTCH,NBLCK)
+      KS     =  KPATCHS(NPTCH,NBLCK)
+      KE     =  KPATCHE(NPTCH,NBLCK)
+C
+      IMS    = IS-NMOVE
+      IF(IMS.LT.1) IMS = 1
+      JMS    = JS-NMOVE
+      IF(JMS.LT.1) JMS = 1
+      KMS    = KS-NMOVE
+      IF(KMS.LT.1) KMS = 1
+      IME    = IE+NMOVE
+      IF(IME.GT.IM) IME = IM
+      JME    = JE+NMOVE
+      IF(JME.GT.JM) JME = JM
+      KME    = KE+NMOVE
+      IF(KME.GT.KM) KME = KM
+
+C
+      NXIS   =  IPATCHS(NXPTCH,NXBLCK)
+      NXIE   =  IPATCHE(NXPTCH,NXBLCK) 
+      NXJS   =  JPATCHS(NXPTCH,NXBLCK)
+      NXJE   =  JPATCHE(NXPTCH,NXBLCK)
+      NXKS   =  KPATCHS(NXPTCH,NXBLCK)
+      NXKE   =  KPATCHE(NXPTCH,NXBLCK)
+C
+      IF((IE-IS).NE.(NXIE-NXIS)) THEN 
+      WRITE(6,*) ' WARNING !!! '
+      WRITE(6,*) 'NBLOCK = ',NBLCK,' NPATCH= ',NPTCH,
+     &           ' I LIMITS OF PATCH NOT COMPATIBLE.'
+      WRITE(6,*) ' IS,IE ', IS,IE,' NEXT_IS,NEXT_IE ', NXIS ,NXIE
+      ENDIF
+C 
+      IF((JE-JS).NE.(NXJE-NXJS)) THEN 
+      WRITE(6,*) ' WARNING !!! '
+      WRITE(6,*) 'NBLOCK = ',NBLCK, 'NPATCH= ',NPTCH,
+     &           ' J LIMITS OF PATCH NOT COMPATIBLE.' 
+      WRITE(6,*)  ' JS,JE ', JS,JE,' NEXT_JS,NEXT_JE ', NXJS ,NXJE
+      ENDIF
+C   
+      IF((KE-KS).NE.(NXKE-NXKS)) THEN
+      WRITE(6,*) ' WARNING !!! '
+      WRITE(6,*) 'NBLOCK = ',NBLCK, 'NPATCH= ',NPTCH,
+     &           ' K LIMITS OF PATCH NOT COMPATIBLE.'
+      WRITE(6,*) ' KS,KE ', KS,KE,' NEXT_KS,NEXT_KE ', NXKS ,NXKE
+      ENDIF
+C
+C
+      IF(JS.NE.JE) THEN
+      DO 10 J=1,JM
+      IF(JS.EQ.1.AND.J.EQ.1)       FACJ(J) = 1.0
+      IF(JS.NE.1.AND.J.LT.JMS)     FACJ(J) = 0.0
+      IF(JS.NE.1.AND.J.GE.JMS)     FACJ(J) = FLOAT(J-JMS)/(JS-JMS)
+      IF(J.GE.JS.AND.J.LE.JE)      FACJ(J) = 1.0
+      IF(J.GT.JE.AND.J.LE.JME)     FACJ(J) = FLOAT(JME-J)/(JME-JE)
+      IF(JE.NE.JM.AND.J.GT.JME)    FACJ(J) = 0.0
+      IF(JE.EQ.JM.AND.J.EQ.JM)     FACJ(J) = 1.0
+   10 CONTINUE
+      ENDIF
+C
+      IF(KS.NE.KE) THEN
+      DO 20 K=1,KM
+      IF(KS.EQ.1.AND.K.EQ.1)       FACK(K) = 1.0
+      IF(KS.NE.1.AND.K.LT.KMS)     FACK(K) = 0.0
+      IF(KS.NE.1.AND.K.GE.KMS)     FACK(K) = FLOAT(K-KMS)/(KS-KMS)
+      IF(K.GE.KS.AND.K.LE.KE)      FACK(K) = 1.0
+      IF(K.GT.KE.AND.K.LE.KME)     FACK(K) = FLOAT(KME-K)/(KME-KE)
+      IF(KE.NE.KM.AND.K.GT.KME)    FACK(K) = 0.0
+      IF(KE.EQ.KM.AND.K.EQ.KM)     FACK(K) = 1.0
+   20 CONTINUE
+      ENDIF
+C
+      IF(IS.NE.IE) THEN
+      DO 30 I=1,IM
+      IF(IS.EQ.1.AND.I.EQ.1)       FACI(I) = 1.0
+      IF(IS.NE.1.AND.I.LT.IMS)     FACI(I) = 0.0
+      IF(IS.NE.1.AND.I.GE.IMS)     FACI(I) = FLOAT(I-IMS)/(IS-IMS)
+      IF(I.GE.IS.AND.I.LE.IE)      FACI(I) = 1.0
+      IF(I.GT.IE.AND.I.LE.IME)     FACI(I) = FLOAT(IME-I)/(IME-IE)
+      IF(IE.NE.IM.AND.I.GT.IME)    FACI(I) = 0.0
+      IF(IE.EQ.IM.AND.I.EQ.IM)     FACI(I) = 1.0
+   30 CONTINUE
+      ENDIF
+
+C******************************************************************************
+C
+C     NOW MOVE THE GRID POINTS TO MAKE THE PATCHES MATCH EXACTLY
+C     FIRST FOR A PATCH ON THE I = CONSTANT FACE
+C
+C
+      IF(IS.EQ.IE) THEN
+C
+      IX = NXIS
+      IP = IS
+      IF(NPERP.GT.IM) NPERP = 1000
+      IF(NPERP.EQ.0)  NPERP = 0.5*IM
+C
+      DO 100 J=1,JM
+C
+      DO 100 K=1,KM
+C
+      IF((J.GE.JS.AND.J.LE.JE).AND.(K.GE.KS.AND.K.LE.KE)) GO TO 100
+C
+C  FIRST SET THE LEFT HAND SIDE J = 1 TO JS
+C
+      IF(J.LT.JS.AND.K.GE.KS.AND.K.LE.KE) THEN
+      JX   =  NXJS
+      KX   =  NXKS + K - KS
+      JP   =  JS
+      KP   =  K
+      ENDIF
+C
+C  NEXT SET THE TOP SIDE K = KE TO KM
+C
+      IF(K.GT.KS.AND.J.GE.JS.AND.J.LE.JE) THEN
+      JX  =  NXJS + J - JS
+      KX  =  NXKE
+      JP  =  J
+      KP  =  KE
+      ENDIF
+C
+C  NEXT SET THE RIGHT HAND SIDE J = JE TO JM
+C
+      IF(J.GT.JE.AND.K.GE.KS.AND.K.LE.KE) THEN
+      JX   =  NXJE
+      KX   =  NXKS + K - KS
+      JP   =  JE
+      KP   =  K
+      ENDIF
+C
+C  NEXT SET THE BOTTOM SIDE K = 1 TO KS
+C
+      IF(K.LT.KS.AND.J.GE.JS.AND.J.LE.JE) THEN
+      JX   =  NXJS + J - JS
+      KX   =  NXKS
+      JP   =  J
+      KP   =  KS
+      ENDIF
+C
+C     SET THE BOTTOM LEFT CORNER FROM J=1,JS, K=1,KS
+C
+      IF(J.LT.JS.AND.K.LT.KS) THEN
+      JX = NXJS
+      KX = NXKS
+      JP = JS
+      KP = KS
+      ENDIF
+C
+C     SET THE TOP LEFT CORNER FROM J=1,JS, K=KS,KM
+C
+      IF(J.LT.JS.AND.K.GT.KE) THEN
+      JX = NXJS
+      KX = NXKE
+      JP = JS
+      KP = KE
+      ENDIF
+C
+C     SET THE TOP RIGHT CORNER FROM J=JE,JM, K=KE,KM
+C
+      IF(J.GT.JE.AND.K.GT.KE) THEN
+      JX = NXJE
+      KX = NXKE
+      JP = JE
+      KP = KE
+      ENDIF
+C
+C     SET THE BOTTOM RIGHT CORNER FROM J=JE,JM, K=1,KS
+C
+      IF(J.GT.JE.AND.K.LT.KS) THEN
+      JX = NXJE
+      KX = NXKS
+      JP = JE
+      KP = KS
+      ENDIF
+C
+      IF(ICALL.EQ.0) THEN
+      XSHIFT  =  FMOVE*(X(IX,JX,KX,NXBLCK)  -  X(IP,JP,KP,NBLCK))
+      RSHIFT  =  FMOVE*(R(IX,JX,KX,NXBLCK)  -  R(IP,JP,KP,NBLCK))
+      RTSHIFT =  FMOVE*(RT(IX,JX,KX,NXBLCK) - RT(IP,JP,KP,NBLCK))
+      ELSE
+      XSHIFT  =  STORE1(IX,JX,KX)    -  X(IP,JP,KP,NBLCK)
+      RSHIFT  =  STORE2(IX,JX,KX)    -  R(IP,JP,KP,NBLCK)
+      RTSHIFT =  STORE3(IX,JX,KX)    - RT(IP,JP,KP,NBLCK)
+      ENDIF
+C
+      DO 110 I=1,IM
+      IF(IS.EQ.1)  FAKI = FLOAT(NPERP-I)/FLOAT(NPERP-1)
+      IF(IS.EQ.IM) FAKI = FLOAT(I-(IM-NPERP+1))/(NPERP-1)
+      IF(FAKI.LT.0.0) FAKI = 0.0
+      IF(NPERP.GT.IM) FAKI = 1.0
+      FAC = FAKI*FACK(K)*FACJ(J)
+      FAC = FAC**POWER
+      X(I,J,K,NBLCK)  = X(I,J,K,NBLCK)  + FAC*XSHIFT
+      R(I,J,K,NBLCK)  = R(I,J,K,NBLCK)  + FAC*RSHIFT
+      RT(I,J,K,NBLCK) = RT(I,J,K,NBLCK) + FAC*RTSHIFT
+  110 CONTINUE
+C
+  100 CONTINUE
+C
+C     THE POINTS OUTSIDE THE PATCH HAVE NOW BEEN RESET.
+C
+C     SET THE POINTS WITHIN THE PATCH TO MATCH EXACTLY.
+C
+      DO 150 K=KS,KE
+      KX   =  NXKS + K - KS
+      DO 150 J=JS,JE
+      JX   =  NXJS + J - JS
+C
+      IF(ICALL.EQ.0) THEN
+      XSHIFT  =  FMOVE*(X(IX,JX,KX,NXBLCK)  -  X(IS,J,K,NBLCK))
+      RSHIFT  =  FMOVE*(R(IX,JX,KX,NXBLCK)  -  R(IS,J,K,NBLCK))
+      RTSHIFT =  FMOVE*(RT(IX,JX,KX,NXBLCK) - RT(IS,J,K,NBLCK))
+      ELSE
+      XSHIFT  =  STORE1(IX,JX,KX)    -  X(IS,J,K,NBLCK)
+      RSHIFT  =  STORE2(IX,JX,KX)    -  R(IS,J,K,NBLCK)
+      RTSHIFT =  STORE3(IX,JX,KX)    - RT(IS,J,K,NBLCK)
+      ENDIF
+C
+      DO 160 I=1,IM
+      IF(IS.EQ.1)  FAKI = FLOAT(NPERP-I)/FLOAT(NPERP-1)
+      IF(IS.EQ.IM) FAKI = FLOAT(I-(IM-NPERP+1))/(NPERP-1)
+      IF(FAKI.LT.0.0) FAKI = 0.0
+      IF(NPERP.GT.IM) FAKI = 1.0
+      X(I,J,K,NBLCK) = X(I,J,K,NBLCK) + FAKI*XSHIFT
+      R(I,J,K,NBLCK) = R(I,J,K,NBLCK) + FAKI*RSHIFT
+      RT(I,J,K,NBLCK)= RT(I,J,K,NBLCK)+ FAKI*RTSHIFT
+  160 CONTINUE
+C
+  150 CONTINUE
+C
+C
+C   END OF I FACE GRID MATCHING
+C
+      ENDIF
+C
+C**************************************************************************************
+C
+C     NOW FOR A PATCH ON THE J = CONSTANT FACE
+C
+      IF(JS.EQ.JE) THEN
+C
+      JX = NXJS
+      JP = JS
+      IF(NPERP.GT.JM) NPERP = 1000
+      IF(NPERP.EQ.0)  NPERP = 0.5*JM
+C
+      DO 200 I=1,IM
+C
+      DO 200 K=1,KM
+C
+      IF((I.GE.IS.AND.I.LE.IE).AND.(K.GE.KS.AND.K.LE.KE)) GO TO 200
+C
+C  FIRST SET THE LEFT HAND SIDE I = 1 TO IS
+C
+      IF(I.LT.IS.AND.K.GE.KS.AND.K.LE.KE) THEN
+      IX   =  NXIS
+      KX   =  NXKS + K - KS
+      IP   =  IS
+      KP   =  K
+      ENDIF
+C
+C  NEXT SET THE TOP SIDE K = KE TO KM
+C
+      IF(K.GT.KS.AND.I.GE.IS.AND.I.LE.IE) THEN
+      IX  =  NXIS + I - IS
+      KX  =  NXKE
+      IP  =  I
+      KP  =  KE
+      ENDIF
+C
+C  NEXT SET THE RIGHT HAND SIDE I = IE TO IM
+C
+      IF(I.GT.IE.AND.K.GE.KS.AND.K.LE.KE) THEN
+      IX   =  NXIE
+      KX   =  NXKS + K - KS
+      IP   =  IE
+      KP   =  K
+      ENDIF
+C
+C  NEXT SET THE BOTTOM SIDE K = 1 TO KS
+C
+      IF(K.LT.KS.AND.I.GE.IS.AND.I.LE.IE) THEN
+      IX   =  NXIS + I - IS
+      KX   =  NXKS
+      IP   =  I
+      KP   =  KS
+      ENDIF
+C
+C     SET THE BOTTOM LEFT CORNER FROM I=1,IS, K=1,KS
+C
+      IF(I.LT.IS.AND.K.LT.KS) THEN
+      IX = NXIS
+      KX = NXKS
+      IP = IS
+      KP = KS
+      ENDIF
+C
+C     SET THE TOP LEFT CORNER FOM I=1,IS, K=KS,KM
+C
+      IF(I.LT.IS.AND.K.GT.KE) THEN
+      IX = NXIS
+      KX = NXKE
+      IP = IS
+      KP = KE
+      ENDIF
+C
+C     SET THE TOP RIGHT CORNER FOM I=IE,IM, K=KE,KM
+C
+      IF(I.GT.IE.AND.K.GT.KE) THEN
+      IX = NXIE
+      KX = NXKE
+      IP = IE
+      KP = KE
+      ENDIF
+C
+C     SET THE BOTTOM RIGHT CORNER FOM I=IE,IM, K=1,KS
+C
+      IF(I.GT.IE.AND.K.LT.KS) THEN
+      IX = NXIE
+      KX = NXKS
+      IP = IE
+      KP = KS
+      ENDIF
+C
+      IF(ICALL.EQ.0) THEN
+      XSHIFT  = FMOVE*(X(IX,JX,KX,NXBLCK)  -  X(IP,JP,KP,NBLCK))
+      RSHIFT  = FMOVE*(R(IX,JX,KX,NXBLCK)  -  R(IP,JP,KP,NBLCK))
+      RTSHIFT = FMOVE*(RT(IX,JX,KX,NXBLCK) - RT(IP,JP,KP,NBLCK))
+      ELSE
+      XSHIFT  =  STORE1(IX,JX,KX)    -  X(IP,JP,KP,NBLCK)
+      RSHIFT  =  STORE2(IX,JX,KX)    -  R(IP,JP,KP,NBLCK)
+      RTSHIFT =  STORE3(IX,JX,KX)    - RT(IP,JP,KP,NBLCK)
+      ENDIF
+C
+      DO 210 J=1,JM
+      IF(JS.EQ.1)  FAKJ = FLOAT(NPERP-J)/FLOAT(NPERP-1)
+      IF(JS.EQ.JM) FAKJ = FLOAT(J-(JM-NPERP+1))/(NPERP-1)
+      IF(FAKJ.LT.0.0) FAKJ = 0.0
+      IF(NPERP.GT.JM) FAKJ = 1.0
+      FAC = FAKJ*FACK(K)*FACI(I)
+      FAC = FAC**POWER
+      X(I,J,K,NBLCK)  = X(I,J,K,NBLCK)  + FAC*XSHIFT
+      R(I,J,K,NBLCK)  = R(I,J,K,NBLCK)  + FAC*RSHIFT
+      RT(I,J,K,NBLCK) = RT(I,J,K,NBLCK) + FAC*RTSHIFT
+  210 CONTINUE
+C
+  200 CONTINUE
+C
+C     THE POINTS OUTSIDE THE PATCH HAVE NOW BEEN RESET.
+C
+C     SET THE POINTS WITHIN THE PATCH
+C
+      DO 250 K=KS,KE
+      KX   =  NXKS + K - KS
+      DO 250 I=IS,IE
+      IX   =  NXIS + I - IS
+C
+      IF(ICALL.EQ.0) THEN
+      XSHIFT  = FMOVE*(X(IX,JX,KX,NXBLCK)  -  X(I,JS,K,NBLCK))
+      RSHIFT  = FMOVE*(R(IX,JX,KX,NXBLCK)  -  R(I,JS,K,NBLCK))
+      RTSHIFT = FMOVE*(RT(IX,JX,KX,NXBLCK) - RT(I,JS,K,NBLCK))
+      ELSE
+      XSHIFT  =  STORE1(IX,JX,KX)    -  X(I,JS,K,NBLCK)
+      RSHIFT  =  STORE2(IX,JX,KX)    -  R(I,JS,K,NBLCK)
+      RTSHIFT =  STORE3(IX,JX,KX)    - RT(I,JS,K,NBLCK)
+      ENDIF
+C
+      DO 260 J=1,JM
+      IF(JS.EQ.1)  FAKJ = FLOAT(NPERP-J)/FLOAT(NPERP-1)
+      IF(JS.EQ.JM) FAKJ = FLOAT(J-(JM-NPERP+1))/(NPERP-1)
+      IF(FAKJ.LT.0.0) FAKJ = 0.0
+      IF(NPERP.GT.JM) FAKJ = 1.0
+      X(I,J,K,NBLCK) = X(I,J,K,NBLCK) + FAKJ*XSHIFT
+      R(I,J,K,NBLCK) = R(I,J,K,NBLCK) + FAKJ*RSHIFT
+      RT(I,J,K,NBLCK)= RT(I,J,K,NBLCK)+ FAKJ*RTSHIFT
+  260 CONTINUE
+C
+  250 CONTINUE
+C
+      ENDIF
+C
+C   END OF J  FACE GRID MATCHING
+C***********************************************************************************
+C
+C     NOW FOR A PATCH ON THE K = CONSTANT FACE
+C
+      IF(KS.EQ.KE) THEN
+C
+      KX = NXKS
+      KP = KS
+      IF(NPERP.GT.KM) NPERP = 1000
+      IF(NPERP.EQ.0)  NPERP = 0.5*KM
+C
+      DO 300 J=1,JM
+C
+      DO 300 I=1,IM
+C
+      IF((J.GE.JS.AND.J.LE.JE).AND.(I.GE.IS.AND.I.LE.IE)) GO TO 300
+C
+C  FIRST SET THE LEFT HAND SIDE J = 1 TO JS
+C
+      IF(J.LT.JS.AND.I.GE.IS.AND.I.LE.IE) THEN
+      JX   =  NXJS
+      IX   =  NXIS + I - IS
+      JP   =  JS
+      IP   =  I
+      ENDIF
+C
+C  NEXT SET THE TOP SIDE I = IE TO IM
+C
+      IF(I.GT.IS.AND.J.GE.JS.AND.J.LE.JE) THEN
+      JX  =  NXJS + J - JS
+      IX  =  NXIE
+      JP  =  J
+      IP  =  IE
+      ENDIF
+C
+C  NEXT SET THE RIGHT HAND SIDE J = JE TO JM
+C
+      IF(J.GT.JE.AND.I.GE.IS.AND.I.LE.IE) THEN
+      JX   =  NXJE
+      IX   =  NXIS + I - IS
+      JP   =  JE
+      IP   =  I
+      ENDIF
+C
+C  NEXT SET THE BOTTOM SIDE I = 1 TO IS
+C
+      IF(I.LT.IS.AND.J.GE.JS.AND.J.LE.JE) THEN
+      JX   =  NXJS + J - JS
+      IX   =  NXIS
+      JP   =  J
+      IP   =  IS
+      ENDIF
+C
+C     SET THE BOTTOM LEFT CORNER FROM J=1,JS, I=1,IS
+C
+      IF(J.LT.JS.AND.I.LT.IS) THEN
+      JX = NXJS
+      IX = NXIS
+      JP = JS
+      IP = IS
+      ENDIF
+C
+C     SET THE TOP LEFT CORNER FOM J=1,JS, I=IS,IM
+C
+      IF(J.LT.JS.AND.I.GT.IE) THEN
+      JX = NXJS
+      IX = NXIE
+      JP = JS
+      IP = IE
+      ENDIF
+C
+C     SET THE TOP RIGHT CORNER FOM J=JE,JM, I=IE,IM
+C
+      IF(J.GT.JE.AND.I.GT.IE) THEN
+      JX = NXJE
+      IX = NXIE
+      JP = JE
+      IP = IE
+      ENDIF
+C
+C     SET THE BOTTOM RIGHT CORNER FOM J=JE,JM, I=1,IS
+C
+      IF(J.GT.JE.AND.I.LT.IS) THEN
+      JX = NXJE
+      IX = NXIS
+      JP = JE
+      IP = IS
+      ENDIF
+C
+      IF(ICALL.EQ.0) THEN
+C
+      PITCH    = 2*PI*R(IP,JP,KP,NBLCK)/NOBLADES(NPTCH,NBLCK)
+      IF(KP.EQ.KM) PITCH = - PITCH
+      XSHIFT   =  FMOVE*(X(IX,JX,KX,NXBLCK)  -  X(IP,JP,KP,NBLCK))
+      RSHIFT   =  FMOVE*(R(IX,JX,KX,NXBLCK)  -  R(IP,JP,KP,NBLCK))
+C
+      IF(PTYPE.EQ.'P') 
+     &   RTSHIFT = FMOVE*(RT(IX,JX,KX,NXBLCK) - RT(IP,JP,KP,NBLCK))
+C
+      IF(PTYPE.EQ.'B') 
+     &   RTSHIFT = FMOVE*(RT(IX,JX,KX,NXBLCK)-PITCH-RT(IP,JP,KP,NBLCK))
+C
+      ELSE
+      XSHIFT  =  STORE1(IX,JX,KX)    -  X(IP,JP,KP,NBLCK)
+      RSHIFT  =  STORE2(IX,JX,KX)    -  R(IP,JP,KP,NBLCK)
+      RTSHIFT =  STORE3(IX,JX,KX)    - RT(IP,JP,KP,NBLCK)
+      ENDIF
+C
+      DO 310 K=1,KM
+      IF(KS.EQ.1)  FAKK = FLOAT(NPERP-K)/FLOAT(NPERP-1)
+      IF(KS.EQ.KM) FAKK = FLOAT(K-(KM-NPERP+1))/(NPERP-1)
+      IF(FAKK.LT.0.0) FAKK = 0.0
+      IF(NPERP.GT.KM) FAKK = 1.0
+      FAC = FAKK*FACI(I)*FACJ(J)
+      FAC = FAC**POWER
+      X(I,J,K,NBLCK)  = X(I,J,K,NBLCK)  + FAC*XSHIFT
+      R(I,J,K,NBLCK)  = R(I,J,K,NBLCK)  + FAC*RSHIFT
+      RT(I,J,K,NBLCK) = RT(I,J,K,NBLCK) + FAC*RTSHIFT
+  310 CONTINUE
+C
+  300 CONTINUE
+C
+C     THE POINTS OUTSIDE THE PATCH HAVE NOW BEEN RESET.
+C
+C    SET THE POINTS WITHIN THE PATCH
+C
+      DO 350 I=IS,IE
+      IX   =  NXIS + I - IS
+      DO 350 J=JS,JE
+      JX   =  NXJS + J - JS
+C
+      IF(ICALL.EQ.0) THEN
+C
+      PITCH    =  2*PI*R(I,J,KS,NBLCK)/NOBLADES(NPTCH,NBLCK)
+      IF(KP.EQ.KM) PITCH = - PITCH
+      XSHIFT   =  FMOVE*(X(IX,JX,KX,NXBLCK)  -  X(I,J,KS,NBLCK))
+      RSHIFT   =  FMOVE*(R(IX,JX,KX,NXBLCK)  -  R(I,J,KS,NBLCK))
+C
+      IF(PTYPE.EQ.'P')
+     &   RTSHIFT =  FMOVE*(RT(IX,JX,KX,NXBLCK) - RT(I,J,KS,NBLCK))
+C
+      IF(PTYPE.EQ.'B') 
+     &   RTSHIFT = FMOVE*(RT(IX,JX,KX,NXBLCK)-PITCH-RT(I,J,KS,NBLCK))
+C
+      ELSE
+      XSHIFT  =  STORE1(IX,JX,KX)    -  X(I,J,KS,NBLCK)
+      RSHIFT  =  STORE2(IX,JX,KX)    -  R(I,J,KS,NBLCK)
+      RTSHIFT =  STORE3(IX,JX,KX)    - RT(I,J,KS,NBLCK)
+      ENDIF
+C
+      DO 360 K=1,KM
+      IF(KS.EQ.1)  FAKK = FLOAT(NPERP-K)/FLOAT(NPERP-1)
+      IF(KS.EQ.KM) FAKK = FLOAT(K-(KM-NPERP+1))/(NPERP-1)
+      IF(FAKK.LT.0.0) FAKK = 0.0
+      IF(NPERP.GT.KM) FAKK = 1.0
+      X(I,J,K,NBLCK) = X(I,J,K,NBLCK) + FAKK*XSHIFT
+      R(I,J,K,NBLCK) = R(I,J,K,NBLCK) + FAKK*RSHIFT
+      RT(I,J,K,NBLCK)= RT(I,J,K,NBLCK)+ FAKK*RTSHIFT
+  360 CONTINUE
+C
+  350 CONTINUE
+C
+
+C   END OF K FACE GRID MATCHING
+C
+      ENDIF
+C
+C
+      RETURN
+      END
+C
+C*************************************************************************
+C
+      SUBROUTINE SET_XLENGTH
+C
+C     THIS SUBROUTINE FINDS THE MIXING LENGTHS FOR DETERMINING THE
+C     TURBULENT VISCOSITY. XLENGTH is the square of the mixing length.
+C     INITIALLY THE MIXING LENGTH AT EVARY GRID POINT IS SET AS "store"
+C
+      INCLUDE 'commall-29'
+C
+      CHARACTER*1  INDMIN
+C
+      WRITE(6,*) ' ENTERED SET_XLENGTH. THIS MAY TAKE A FEW MINUTES. '
+C
+      DO 1000 NBLCK = 1,NBLOCKS
+C
+      IM   = NI(NBLCK)
+      JM   = NJ(NBLCK)
+      KM   = NK(NBLCK)
+      IMM1 = IM-1
+      JMM1 = JM-1
+      KMM1 = KM-1
+C
+C     FIND THE SIZE OF THE BLOCK FOR THE MIXING LENGTH LIMITER
+C
+      SUM_KLENGTH = 0.0
+      DO 10 J=1,JM
+      DO 10 I=1,IM
+      XDIF = X(I,J,1,NBLCK)  - X(I,J,KM,NBLCK)
+      RDIF = R(I,J,1,NBLCK)  - R(I,J,KM,NBLCK)
+      TDIF = RT(I,J,1,NBLCK) - RT(I,J,KM,NBLCK)
+      DL   = SQRT(XDIF*XDIF  + RDIF*RDIF + TDIF*TDIF)
+      SUM_KLENGTH = SUM_KLENGTH + DL
+   10 CONTINUE
+      AVG_KLENGTH = SUM_KLENGTH/(IM*JM)
+C
+      SUM_ILENGTH = 0.0
+      DO 11 J=1,JM
+      DO 11 K=1,KM
+      XDIF = X(1,J,K,NBLCK)  - X(IM,J,K,NBLCK)
+      RDIF = R(1,J,K,NBLCK)  - R(IM,J,K,NBLCK)
+      TDIF = RT(1,J,K,NBLCK) - RT(IM,J,K,NBLCK)
+      DL   = SQRT(XDIF*XDIF  + RDIF*RDIF + TDIF*TDIF)
+      SUM_ILENGTH = SUM_ILENGTH + DL
+   11 CONTINUE
+      AVG_ILENGTH = SUM_ILENGTH/(KM*JM)
+C
+      SUM_JLENGTH = 0.0
+      DO 12 I=1,IM
+      DO 12 K=1,KM
+      XDIF = X(I,1,K,NBLCK)  - X(I,JM,K,NBLCK)
+      RDIF = R(I,1,K,NBLCK)  - R(I,JM,K,NBLCK)
+      TDIF = RT(I,1,K,NBLCK) - RT(I,JM,K,NBLCK)
+      DL   = SQRT(XDIF*XDIF  + RDIF*RDIF + TDIF*TDIF)
+      SUM_JLENGTH = SUM_JLENGTH + DL
+   12 CONTINUE
+      AVG_JLENGTH = SUM_JLENGTH/(KM*IM)
+C
+      DLMIN = AVG_ILENGTH
+      INDMIN = 'I'
+      IF(AVG_JLENGTH.LT.DLMIN) THEN
+      DLMIN = AVG_JLENGTH
+      INDMIN = 'J'
+      ENDIF
+      IF(AVG_KLENGTH.LT.DLMIN) THEN
+      DLMIN = AVG_KLENGTH
+      INDMIN = 'K'
+      ENDIF
+C
+      DIFMIN(NBLCK) = DLMIN
+C
+C 
+      WRITE(6,*)    
+      WRITE(6,*) ' BLOCK NUMBER ', NBLCK
+      WRITE(6,*) ' THE LENGTH ON WHICH THE MIXING LENGTH IS BASED IS ',
+     &              DLMIN
+      WRITE(6,*) ' THIS IS BASED ON THE ', INDMIN, ' GRID DIRECTION.'
+C
+C
+ 1000 CONTINUE
+C
+C
+      DO 2000 NBLCK = 1,NBLOCKS
+C
+      IM   = NI(NBLCK)
+      JM   = NJ(NBLCK)
+      KM   = NK(NBLCK)
+      IMM1 = IM-1
+      JMM1 = JM-1
+      KMM1 = KM-1
+C
+      IF(XLLIMM(NBLCK).GT.0.000001) THEN
+          XLIMIT  =  XLLIMM(NBLCK)*DIFMIN(NBLCK)
+      ELSE
+          XLIMIT  = ABS(XLLIMM(NBLCK))*XLLIMM(NSETVIS)*DIFMIN(NSETVIS)
+      ENDIF
+C
+      XLIMSQ  =  XLIMIT*XLIMIT
+C
+C     THE DISTANCE TO THE NEAREST WALL IS SOUGHT OVER +/- LRANGE GRID POINTS
+C
+      LRANGE = 5
+C
+C     START THE DO 100 LOOPS OVER THE WHOLE BLOCK
+C
+      DO 100 K=1,KM
+      KS = K-LRANGE
+      IF(KS.LT.1) KS=1
+      KE = K+LRANGE
+      IF(KE.GT.KM) KE=KM
+C
+      DO 100 J=1,JM
+      JS = J-LRANGE
+      IF(JS.LT.1) JS=1
+      JE = J+LRANGE
+      IF(JE.GT.JM) JE=JM
+C
+      DO 100 I=1,IM
+      IS = I-LRANGE
+      IF(IS.LT.1) IS=1
+      IE = I+LRANGE
+      IF(IE.GT.IM) IE=IM
+C
+      STORE(I,J,K) = XLIMSQ
+      XP  = X(I,J,K,NBLCK)
+      RP  = R(I,J,K,NBLCK)
+      RTP = RT(I,J,K,NBLCK)
+C
+C
+C     CHECK THE DISTANCE OF THE CURRENT (I,J,K) POINT TO THE I = 1 AND I = IM FACES
+C
+      DO 200 KWALL  = KS,KE,1
+      KM1 = KWALL-1
+      IF(KM1.LT.1)    KM1 = 1
+      KP1 = KWALL
+      IF(KP1.GT.KMM1) KP1 = KMM1
+      DO 200 JWALL  = JS,JE,1
+      JM1 = JWALL-1
+      IF(JM1.LT.1)    JM1 = 1
+      JP1 = JWALL
+      IF(JP1.GT.JMM1) JP1 = JMM1
+C
+      FSOLID = 1.0 -0.25*(MWALLI1(JM1,KM1,NBLCK)+MWALLI1(JP1,KP1,NBLCK)
+     &                  + MWALLI1(JM1,KP1,NBLCK)+MWALLI1(JP1,KM1,NBLCK))
+C
+      XD  = X(1,JWALL,KWALL,NBLCK)  - XP
+      RD  = R(1,JWALL,KWALL,NBLCK)  - RP
+      RTD = RT(1,JWALL,KWALL,NBLCK) - RTP
+      DISTSQ =  XD*XD + RD*RD + RTD*RTD
+      DIST1  = FSOLID*DISTSQ  + (1.0-FSOLID)*XLIMSQ
+C
+      FSOLID = 1.0 -0.25*(MWALLIM(JM1,KM1,NBLCK)+MWALLIM(JP1,KP1,NBLCK)
+     &                  + MWALLIM(JM1,KP1,NBLCK)+MWALLIM(JP1,KM1,NBLCK))
+C
+      XD  = X(IM,JWALL,KWALL,NBLCK)  - XP
+      RD  = R(IM,JWALL,KWALL,NBLCK)  - RP
+      RTD = RT(IM,JWALL,KWALL,NBLCK) - RTP
+      DISTSQ =  XD*XD + RD*RD + RTD*RTD
+      DIST2  = FSOLID*DISTSQ  + (1.0-FSOLID)*XLIMSQ
+C
+      DISTSQ = AMIN1(DIST1,DIST2,XLIMSQ)
+      IF(DISTSQ.LT.STORE(I,J,K)) STORE(I,J,K) = DISTSQ
+  200 CONTINUE
+C
+C
+C     CHECK THE DISTANCE OF THE CURRENT (I,J,K) POINT TO THE J = 1 AND J = JM FACES
+C
+      DO 220 KWALL  = KS,KE,1
+      KM1 = KWALL-1
+      IF(KM1.LT.1)    KM1 = 1
+      KP1 = KWALL
+      IF(KP1.GT.KMM1) KP1 = KMM1
+      DO 220 IWALL  = IS,IE,1
+      IM1 = IWALL-1
+      IF(IM1.LT.1)    IM1 = 1
+      IP1 = IWALL
+      IF(IP1.GT.IMM1) IP1 = IMM1
+C
+      FSOLID = 1.0 -0.25*(MWALLJ1(IM1,KM1,NBLCK)+MWALLJ1(IP1,KP1,NBLCK)
+     &                  + MWALLJ1(IM1,KP1,NBLCK)+MWALLJ1(IP1,KM1,NBLCK))
+C
+      XD  = X(IWALL,1,KWALL,NBLCK)  - XP
+      RD  = R(IWALL,1,KWALL,NBLCK)  - RP
+      RTD = RT(IWALL,1,KWALL,NBLCK) - RTP
+      DISTSQ =  XD*XD + RD*RD + RTD*RTD
+      DIST1  = FSOLID*DISTSQ  + (1.0-FSOLID)*XLIMSQ
+C
+      FSOLID = 1.0 -0.25*(MWALLJM(IM1,KM1,NBLCK)+MWALLJM(IP1,KP1,NBLCK)
+     &                  + MWALLJM(IM1,KP1,NBLCK)+MWALLJM(IP1,KM1,NBLCK))
+C
+      XD  = X(IWALL,JM,KWALL,NBLCK)  - XP
+      RD  = R(IWALL,JM,KWALL,NBLCK)  - RP
+      RTD = RT(IWALL,JM,KWALL,NBLCK) - RTP
+      DISTSQ =  XD*XD + RD*RD + RTD*RTD
+      DIST2  = FSOLID*DISTSQ  + (1.0-FSOLID)*XLIMSQ
+C
+      DISTSQ = AMIN1(DIST1,DIST2,XLIMSQ)
+      IF(DISTSQ.LT.STORE(I,J,K)) STORE(I,J,K) = DISTSQ
+  220 CONTINUE
+C
+C
+C     CHECK THE DISTANCE OF THE CURRENT (I,J,K) POINT TO THE K = 1 AND K = KM FACES
+C
+      DO 230 JWALL  = JS,JE,1
+      JM1 = JWALL-1
+      IF(JM1.LT.1)    JM1 = 1
+      JP1 = JWALL
+      IF(JP1.GT.JMM1) JP1 = JMM1
+      DO 230 IWALL  = IS,IE,1
+      IM1 = IWALL-1
+      IF(IM1.LT.1)    IM1 = 1
+      IP1 = IWALL
+      IF(IP1.GT.IMM1) IP1 = IMM1
+C
+      FSOLID = 1.0 -0.25*(MWALLK1(IM1,JM1,NBLCK)+MWALLK1(IP1,JP1,NBLCK)
+     &                  + MWALLK1(IM1,JP1,NBLCK)+MWALLK1(IP1,JM1,NBLCK))
+C
+      XD  = X(IWALL,JWALL,1,NBLCK)  - XP
+      RD  = R(IWALL,JWALL,1,NBLCK)  - RP
+      RTD = RT(IWALL,JWALL,1,NBLCK) - RTP
+      DISTSQ =  XD*XD + RD*RD + RTD*RTD
+      DIST1  = FSOLID*DISTSQ  + (1.0-FSOLID)*XLIMSQ
+C
+      FSOLID = 1.0 -0.25*(MWALLKM(IM1,JM1,NBLCK)+MWALLKM(IP1,JP1,NBLCK)
+     &                  + MWALLKM(IM1,JP1,NBLCK)+MWALLKM(IP1,JM1,NBLCK))
+C
+      XD  = X(IWALL,JWALL,KM,NBLCK)  - XP
+      RD  = R(IWALL,JWALL,KM,NBLCK)  - RP
+      RTD = RT(IWALL,JWALL,KM,NBLCK) - RTP
+      DISTSQ =  XD*XD + RD*RD + RTD*RTD
+      DIST2  = FSOLID*DISTSQ  + (1.0-FSOLID)*XLIMSQ
+C
+      DISTSQ = AMIN1(DIST1,DIST2,XLIMSQ)
+      IF(DISTSQ.LT.STORE(I,J,K)) STORE(I,J,K) = DISTSQ
+  230 CONTINUE
+C
+C
+  100 CONTINUE
+C
+C
+C   SET THE MIXING LENGTH TO ZERO ON ALL SOLID BOUNDARIES.
+C
+      DO 300 K=1,KMM1
+      DO 300 J=1,JMM1
+      IF(MWALLI1(J,K,NBLCK).EQ.0) THEN
+      STORE(1,J,K)      = 0.0
+      STORE(1,J+1,K)    = 0.0
+      STORE(1,J,K+1)    = 0.0
+      STORE(1,J+1,K+1)  = 0.0
+      ENDIF
+      IF(MWALLIM(J,K,NBLCK).EQ.0) THEN
+      STORE(IM,J,K)      = 0.0
+      STORE(IM,J+1,K)    = 0.0
+      STORE(IM,J,K+1)    = 0.0
+      STORE(IM,J+1,K+1)  = 0.0
+      ENDIF
+  300 CONTINUE
+C
+      DO 310 K=1,KMM1
+      DO 310 I=1,IMM1
+      IF(MWALLJ1(I,K,NBLCK).EQ.0)  THEN
+      STORE(I,1,K)     = 0.0
+      STORE(I+1,1,K)   = 0.0
+      STORE(I,1,K+1)   = 0.0
+      STORE(I+1,1,K+1) = 0.0
+      ENDIF
+      IF(MWALLJM(I,K,NBLCK).EQ.0)  THEN
+      STORE(I,JM,K)     = 0.0
+      STORE(I+1,JM,K)   = 0.0
+      STORE(I,JM,K+1)   = 0.0
+      STORE(I+1,JM,K+1) = 0.0
+      ENDIF
+  310 CONTINUE
+C
+      DO 320 J=1,JMM1
+      DO 320 I=1,IMM1
+      IF(MWALLK1(I,J,NBLCK).EQ.0)  THEN
+      STORE(I,J,1)     = 0.0
+      STORE(I+1,J,1)   = 0.0
+      STORE(I,J+1,1)   = 0.0
+      STORE(I+1,J+1,1) = 0.0
+      ENDIF
+      IF(MWALLKM(I,J,NBLCK).EQ.0)  THEN
+      STORE(I,J,KM)     = 0.0
+      STORE(I+1,J,KM)   = 0.0
+      STORE(I,J+1,KM)   = 0.0
+      STORE(I+1,J+1,KM) = 0.0
+      ENDIF
+  320 CONTINUE
+C
+C     TAKE THE SQUARE ROOT OF "store" BECAUSE IT IS THE MIXING LENGTH SQUARED.
+C
+      DO 400 K=1,KM
+      DO 400 J=1,JM
+      DO 400 I=1,IM
+      STORE(I,J,K) = SQRT(STORE(I,J,K))
+  400 CONTINUE
+
+
+C     NOW AVERAGE THE MIXING LENGTHS FOR EACH CELL, SQUARE IT AND MULTIPLY BY
+C     THE Von Karman CONSTANT WHICH = 0.41
+C     ALSO SET THE INITIAL BODY FORCES TO ZERO
+C
+      FAC = 0.125*0.125*0.41*0.41
+      DO 500 I=1,IMM1
+      DO 500 J=1,JMM1
+      DO 500 K=1,KMM1
+      AVGXL  = STORE(I,J,K)   + STORE(I+1,J,K) + STORE(I+1,J,K+1)
+     &       + STORE(I,J,K+1) + STORE(I,J+1,K) + STORE(I+1,J+1,K)
+     &       + STORE(I+1,J+1,K+1) + STORE(I,J+1,K+1)
+      XLENGTH(I,J,K,NBLCK) = FAC*AVGXL*AVGXL
+      XFORCE(I,J,K,NBLCK)  = 0.0
+      RFORCE(I,J,K,NBLCK)  = 0.0
+      TFORCE(I,J,K,NBLCK)  = 0.0
+  500 CONTINUE
+C
+C    THE MIXING LENGTHS ARE NOW SET FOR THE CURRENT BLOCK.
+C
+      WRITE(6,*)' MIXING LENGTH SET FOR BLOCK NO.',NBLCK,' MIXING LENGTH
+     & LIMIT = ', XLIMIT 
+C
+ 2000 CONTINUE
+C
+      WRITE(6,*) ' FINISHED SET_XLENGTHS '
+C
+      RETURN
+      END
+C
+C***********************************************************************
+C
+      SUBROUTINE SET_VISFORCE(NBLCK)
+C
+      INCLUDE 'commall-29'
+C
+      COMMON/BKSEC/
+     & RO(NIM,NJM,NKM),ROVX(NIM,NJM,NKM),ROVT(NIM,NJM,NKM),
+     & ROVR(NIM,NJM,NKM),ROE(NIM,NJM,NKM),HO(NIM,NJM,NKM),
+     & RORVT(NIM,NJM,NKM),VX(NIM,NJM,NKM),VT(NIM,NJM,NKM),
+     & VR(NIM,NJM,NKM),WT(NIM,NJM,NKM),ROWT(NIM,NJM,NKM),
+     & P(NIM,NJM,NKM),TSTATIC(NIM,NJM,NKM)
+C
+      COMMON/BKSTRESS/  TXX(NIM,NJM,NKM),TXR(NIM,NJM,NKM),
+     & TXT(NIM,NJM,NKM),TRX(NIM,NJM,NKM),TRR(NIM,NJM,NKM),
+     & TRT(NIM,NJM,NKM),TTX(NIM,NJM,NKM),TTR(NIM,NJM,NKM),
+     & TTT(NIM,NJM,NKM),QXX(NIM,NJM,NKM),QRR(NIM,NJM,NKM),
+     & QTT(NIM,NJM,NKM)
+C
+      COMMON/BKFORCE/ FORCEX(NIM,NJM,NKM),FORCER(NIM,NJM,NKM),
+     &                FORCET(NIM,NJM,NKM),QSOURCE(NIM,NJM,NKM)
+C
+      IM   = NI(NBLCK)
+      JM   = NJ(NBLCK)
+      KM   = NK(NBLCK)
+      IMM1 = IM-1
+      JMM1 = JM-1
+      KMM1 = KM-1
+      CP_PR  = CP/PRANDTL
+C
+C     IF REYNO IS NEGATIVE THE LAMINAR VISCOSITY IS CONSTANT AND = -REYNO 
+C
+      IF(REYNO.LT.0.0) GO TO 15
+C
+C     CALCULATE THE NEW LAMINAR VISCOSITY IF NBLCK = NSETVIS, EVERY 10 STEPS.
+C
+         RELVIS  = 0.25
+         RELVIS1 = 1.0 -RELVIS
+C
+         IF(NSTEP.LE.10) THEN
+         RELVIS = 1.0
+         RELVIS1= 0.0
+         ENDIF
+C
+      IF(MOD(NSTEP,10).EQ.0.AND.NBLCK.EQ.NSETVIS) THEN
+C
+         ROWAVG = 0.0
+         DO 10 K=KSETVISS,KSETVISE
+         DO 10 J=JSETVISS,JSETVISE
+         DO 10 I=ISETVISS,ISETVISE
+         ROVMSQ  = ROVX(I,J,K)*ROVX(I,J,K) + ROVR(I,J,K)*ROVR(I,J,K)
+         RWT     = ROVT(I,J,K) - WROTBLK(NBLCK)*RBLK(I,J,K)*RO(I,J,K)
+         ROWTSQ  = RWT*RWT
+         ROWREF  = SQRT(ROVMSQ + ROWTSQ)
+         ROWAVG  = ROWAVG + ROWREF
+   10 CONTINUE
+C
+          ROWREF  = ROWAVG/NSETPOINTS   
+	  VISNEW  = ROWREF*SSETVIS/REYNO
+          VISLAM  = RELVIS1*VISLAM + RELVIS*VISNEW
+C
+C     WRITE OUT THE VALUE OF LAMINAR VISCOSITY EVERY 100 STEPS
+C
+      IF(MOD(NSTEP,100).EQ.0) THEN
+          WRITE(6,*)
+          WRITE(6,*)' THE LAMINAR VISCOSITY IS SET IN BLOCK No.',NBLCK
+          WRITE(6,*)' THE INPUT VALUE OF REYNOLDS NUMBER    = ', REYNO
+          WRITE(6,*)' USING DISTANCE= ',SSETVIS,' AND RO*V  = ', ROWREF
+          WRITE(6,*)' CURRENT VALUE OF LAMINAR VISCOSITY    = ', VISLAM 
+          WRITE(6,*)
+      ENDIF
+C
+      ENDIF
+C
+C     END OF SETTING OF LAMINAR VISCOSITY
+C
+   15 CONTINUE
+C
+C     SET THE VISCOUS FORCES AND ENERGY SOURCES TO ZERO
+C
+      DO 100 K=1,KMM1
+      DO 100 J=1,JMM1
+      DO 100 I=1,IMM1
+      FORCEX(I,J,K)  = 0.0
+      FORCER(I,J,K)  = 0.0
+      FORCET(I,J,K)  = 0.0
+      QSOURCE(I,J,K) = 0.0
+  100 CONTINUE
+C
+C
+      DO 150 K=1,KMM1
+      KP1 = K+1
+      DO 150 J=1,JMM1
+      JP1 = J+1
+      DO 150 I=1,IMM1
+      IP1 = I+1
+C
+C    AVERAGE THE CONDITIONS FOR THE CELLS. Note these are true averages.
+C
+      VXAVG = 0.125*(VX(I,J,K)+VX(IP1,J,K)+VX(IP1,J,KP1)+VX(I,J,KP1)
+     &      + VX(I,JP1,K)+VX(IP1,JP1,K)+VX(IP1,JP1,KP1)+VX(I,JP1,KP1))
+      VRAVG = 0.125*(VR(I,J,K)+VR(IP1,J,K)+VR(IP1,J,KP1)+VR(I,J,KP1)
+     &      + VR(I,JP1,K)+VR(IP1,JP1,K)+VR(IP1,JP1,KP1)+VR(I,JP1,KP1))
+      VTAVG = 0.125*(VT(I,J,K)+VT(IP1,J,K)+VT(IP1,J,KP1)+VT(I,J,KP1)
+     &      + VT(I,JP1,K)+VT(IP1,JP1,K)+VT(IP1,JP1,KP1)+VT(I,JP1,KP1))
+      ROAVG = 0.125*(RO(I,J,K)+RO(IP1,J,K)+RO(IP1,J,KP1)+RO(I,J,KP1)
+     &      + RO(I,JP1,K)+RO(IP1,JP1,K)+RO(IP1,JP1,KP1)+RO(I,JP1,KP1))
+C
+C     CALCULATE THE DERIVATIVES OF THE VELOCITY COMPONENTS AND TEMPERATURE.
+C
+      CALL GRADVEL(VX,DVXDX,DVXDR,DVXDT,I,J,K,NBLCK)
+      CALL GRADVEL(VR,DVRDX,DVRDR,DVRDT,I,J,K,NBLCK)
+      CALL GRADVEL(VT,DVTDX,DVTDR,DVTDT,I,J,K,NBLCK)
+      CALL GRADVEL(TSTATIC,DTEMPDX,DTEMPDR,DTEMPDT,I,J,K,NBLCK)
+C
+C      CALCULATE THE GRADIENT OF THE ABSOLUTE VELOCITY
+C      AND HENCE THE TURBULENT VISCOSITY FOR THE CELL.
+C      
+      VDVDX  = VXAVG*DVXDX + VRAVG*DVRDX + VTAVG*DVTDX
+      VDVDR  = VXAVG*DVXDR + VRAVG*DVRDR + VTAVG*DVTDR
+      VDVDT  = VXAVG*DVXDT + VRAVG*DVRDT + VTAVG*DVTDT
+C
+      VAVG    = SQRT(VXAVG*VXAVG + VRAVG*VRAVG + VTAVG*VTAVG)
+      GRADV   = SQRT(VDVDX*VDVDX + VDVDR*VDVDR + VDVDT*VDVDT)/VAVG
+      TURBVIS = ROAVG*XLENGTH(I,J,K,NBLCK)*GRADV
+C
+C    
+C
+      VISTOT  = VISLAM + TURBVIS
+      THCOND  = CP_PR*VISTOT
+      VISTOT2 =  2.0*VISTOT
+C
+C     TURBVIS AND VISLAM ARE THE TRUE TURBULENT AND LAMINAR VISCOSITIES. 
+C     VISTOT2 = 2*VISTOT FOR THE NORMAL STRESSES.
+C
+C     SAVE THE TURBULENT/LAMINAR VISCOSITY RATIO AS "SPAREVAR"
+C
+       SPAREVAR(I,J,K,NBLCK) = VISTOT/VISLAM
+C      SPAREVAR(I,J,K,NBLCK) = SQRT(XLENGTH(I,J,K,NBLCK))
+C
+C     SET THE STRESSES AND HEAT FLOWS IN THE ELEMENT
+C     JDD WARNING the div V term in the normal stresses is not yet included.
+C
+      TXR(I,J,K) = VISTOT*(DVXDR + DVRDX)
+      TXX(I,J,K) = VISTOT2*DVXDX
+      TXT(I,J,K) = VISTOT*(DVTDX + DVXDT)
+      TRX(I,J,K) = VISTOT*(DVXDR + DVRDX)
+      TRR(I,J,K) = VISTOT2*DVRDR
+      TRT(I,J,K) = VISTOT*(DVTDR + DVRDT)
+      TTX(I,J,K) = VISTOT*(DVXDT + DVTDX)
+      TTT(I,J,K) = VISTOT2*DVTDT
+      TTR(I,J,K) = VISTOT*(DVRDT + DVTDR)
+      QXX(I,J,K) = -THCOND*DTEMPDX
+      QRR(I,J,K) = -THCOND*DTEMPDR
+      QTT(I,J,K) = -THCOND*DTEMPDT
+C
+  150 CONTINUE
+C
+C*************************************************************************
+C     CALCULATE THE WALL SHEAR STRESSES ON ALL THE SOLID SURFACES.
+C     THE FACTOR OF 64 ON FMULT IS TO ALLOW FOR THE AVERAGE VELOCITIES AND
+C     DENSITY ALL BEING x 4.
+C
+      FMULT     = CFWALL/64.
+      VISLAM16  = VISLAM*16.0
+C
+      DO 200 K=1,KMM1
+      DO 200 J=1,JMM1
+C
+C******************FIRST FOR THE I = 1 WALL.****************************
+C
+      IF(MWALLI1(J,K,NBLCK).EQ.1) GO TO 210
+C     
+      AREA1  = SQRT(AIX(1,J,K,NBLCK)*AIX(1,J,K,NBLCK) +
+     &              AIR(1,J,K,NBLCK)*AIR(1,J,K,NBLCK) +
+     &              AIT(1,J,K,NBLCK)*AIT(1,J,K,NBLCK))
+C
+      IF(ILOS.EQ.11) THEN
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOSS11
+C
+      VXAVG1 = VX(1,J,K)+VX(1,J+1,K)+VX(1,J+1,K+1)+VX(1,J,K+1)
+      VRAVG1 = VR(1,J,K)+VR(1,J+1,K)+VR(1,J+1,K+1)+VR(1,J,K+1)
+      VTAVG1 = VT(1,J,K)+VT(1,J+1,K)+VT(1,J+1,K+1)+VT(1,J,K+1)
+      ROAVG1 = RO(1,J,K)+RO(1,J+1,K)+RO(1,J+1,K+1)+RO(1,J,K+1)
+      RAVG1  = RBLK(1,J,K) + RBLK(1,J+1,K) + RBLK(1,J+1,K+1)
+     &       + RBLK(1,J,K+1)
+      WTAVG1 = VTAVG1 - WROTI1(NBLCK)*RAVG1
+      WAVSQ  = VXAVG1*VXAVG1 + VRAVG1*VRAVG1 + WTAVG1*WTAVG1
+      WAVG   = SQRT(WAVSQ)
+      TWALLI1= FMULT*WAVSQ*ROAVG1
+C
+      ENDIF
+C
+      IF(ILOS.EQ.9) THEN
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOSS9
+C
+      VXAVG1 = VX(2,J,K)+VX(2,J+1,K)+VX(2,J+1,K+1)+VX(2,J,K+1)
+      VRAVG1 = VR(2,J,K)+VR(2,J+1,K)+VR(2,J+1,K+1)+VR(2,J,K+1)
+      VTAVG1 = VT(2,J,K)+VT(2,J+1,K)+VT(2,J+1,K+1)+VT(2,J,K+1)
+      ROAVG1 = RO(2,J,K)+RO(2,J+1,K)+RO(2,J+1,K+1)+RO(2,J,K+1)
+      RAVG1  = RBLK(2,J,K) + RBLK(2,J+1,K) + RBLK(2,J+1,K+1)
+     &       + RBLK(2,J,K+1)
+      WTAVG1  = VTAVG1 - WROTI1(NBLCK)*RAVG1
+      WAVG    = SQRT(WTAVG1*WTAVG1 + VXAVG1*VXAVG1 + VRAVG1*VRAVG1)
+C
+      DPERP   = VOL(1,J,K,NBLCK)/AREA1
+      RE      = DPERP*ROAVG1*WAVG/VISLAM16
+      RELOG   = 1./ALOG(RE)
+      CFWALL  = -0.000883 + 0.01588*RELOG + 0.12807*RELOG*RELOG
+      IF(RE.LT.125.0)  CFWALL =  1.0/RE
+      TWALLI1 = CFWALL*ROAVG1*WAVG*WAVG/64.
+C
+      ENDIF
+C
+      XFORCE1 = -TWALLI1*AREA1*VXAVG1/WAVG
+      RFORCE1 = -TWALLI1*AREA1*VRAVG1/WAVG
+      TFORCE1 = -TWALLI1*AREA1*WTAVG1/WAVG
+      WVISC1  =  TFORCE1*WROTI1(NBLCK)*0.25*RAVG1
+C     ASSUME ADIABATIC WALL HERE
+C      QFLOW1  = 0.0
+C
+      FORCEX(1,J,K)    = FORCEX(1,J,K)    + XFORCE1
+      FORCER(1,J,K)    = FORCER(1,J,K)    + RFORCE1
+      FORCET(1,J,K)    = FORCET(1,J,K)    + TFORCE1
+      QSOURCE(1,J,K)   = QSOURCE(1,J,K)   + WVISC1
+C
+  210 CONTINUE
+C
+C
+C***************************NOW FOR THE I = IM WALL************************
+C
+C
+      IF(MWALLIM(J,K,NBLCK).EQ.1) GO TO 220
+C
+      AREAIM  = SQRT(AIX(IM,J,K,NBLCK)*AIX(IM,J,K,NBLCK) +
+     &               AIR(IM,J,K,NBLCK)*AIR(IM,J,K,NBLCK) +
+     &               AIT(IM,J,K,NBLCK)*AIT(IM,J,K,NBLCK))
+C
+      IF(ILOS.EQ.11) THEN
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOSS11
+C
+      VXAVGIM = VX(IM,J,K)+VX(IM,J+1,K)+VX(IM,J+1,K+1)+VX(IM,J,K+1)
+      VRAVGIM = VR(IM,J,K)+VR(IM,J+1,K)+VR(IM,J+1,K+1)+VR(IM,J,K+1)
+      VTAVGIM = VT(IM,J,K)+VT(IM,J+1,K)+VT(IM,J+1,K+1)+VT(IM,J,K+1)
+      ROAVGIM = RO(IM,J,K)+RO(IM,J+1,K)+RO(IM,J+1,K+1)+RO(IM,J,K+1)
+      RAVGIM  = RBLK(IM,J,K) + RBLK(IM,J+1,K) 
+     &        + RBLK(IM,J+1,K+1) + RBLK(IM,J,K+1)
+      WTAVGIM = VTAVGIM - WROTIM(NBLCK)*RAVGIM
+      WAVSQ   = VXAVGIM*VXAVGIM + VRAVGIM*VRAVGIM + WTAVGIM*WTAVGIM
+      WAVG    = SQRT(WAVSQ)
+      TWALLIM = FMULT*WAVSQ*ROAVGIM
+C
+      ENDIF
+C
+      IF(ILOS.EQ.9) THEN
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOSS9
+C
+      VXAVGIM = VX(IMM1,J,K)+VX(IMM1,J+1,K)
+     &        + VX(IMM1,J+1,K+1)+VX(IMM1,J,K+1)
+      VRAVGIM = VR(IMM1,J,K)+VR(IMM1,J+1,K)
+     &        + VR(IMM1,J+1,K+1)+VR(IMM1,J,K+1)
+      VTAVGIM = VT(IMM1,J,K)+VT(IMM1,J+1,K)
+     &        + VT(IMM1,J+1,K+1)+VT(IMM1,J,K+1)
+      ROAVGIM = RO(IMM1,J,K)+RO(IMM1,J+1,K)
+     &        + RO(IMM1,J+1,K+1)+RO(IMM1,J,K+1)
+      RAVGIM  = RBLK(IMM1,J,K)+RBLK(IMM1,J+1,K)
+     &        + RBLK(IMM1,J+1,K+1) + RBLK(IMM1,J,K+1)
+      WTAVGIM = VTAVGIM - WROTIM(NBLCK)*RAVGIM
+      WAVG    = SQRT(WTAVGIM*WTAVGIM+VXAVGIM*VXAVGIM+VRAVGIM*VRAVGIM)
+C
+      DPERP    = VOL(IMM1,J,K,NBLCK)/AREAIM
+      RE       = DPERP*ROAVGIM*WAVG/VISLAM16
+      RELOG    = 1./ALOG(RE)
+      CFWALL   = -0.000883 + 0.01588*RELOG + 0.12807*RELOG*RELOG
+      IF(RE.LT.125.0)  CFWALL =  1.0/RE
+      TWALLIM  = CFWALL*ROAVGIM*WAVG*WAVG/64.
+C
+      ENDIF
+C
+      XFORCEIM = -TWALLIM*AREAIM*VXAVGIM/WAVG
+      RFORCEIM = -TWALLIM*AREAIM*VRAVGIM/WAVG
+      TFORCEIM = -TWALLIM*AREAIM*WTAVGIM/WAVG
+      WVISCIM  =  TFORCEIM*WROTIM(NBLCK)*0.25*RAVGIM
+C     ASSUME ADIABATIC WALL HERE
+C      QFLOW1  = 0.0
+C
+      FORCEX(IMM1,J,K)  = FORCEX(IMM1,J,K)   + XFORCEIM
+      FORCER(IMM1,J,K)  = FORCER(IMM1,J,K)   + RFORCEIM
+      FORCET(IMM1,J,K)  = FORCET(IMM1,J,K)   + TFORCEIM
+      QSOURCE(IMM1,J,K) = QSOURCE(IMM1,J,K)  + WVISCIM
+C
+  220 CONTINUE
+C
+C     NOW SUM THE STRESSES ON THE OTHER I = CONSTANT FACES
+C
+      DO 250 I=2,IMM1
+
+      XFOR = 0.5*((TXR(I,J,K)+TXR(I-1,J,K))*AIR(I,J,K,NBLCK)
+     &    +       (TXT(I,J,K)+TXT(I-1,J,K))*AIT(I,J,K,NBLCK)
+     &    +       (TXX(I,J,K)+TXX(I-1,J,K))*AIX(I,J,K,NBLCK))
+      FORCEX(I-1,J,K) = FORCEX(I-1,J,K) + XFOR
+      FORCEX(I,J,K)   = FORCEX(I,J,K)   - XFOR
+
+      RFOR = 0.5*((TRR(I,J,K)+TRR(I-1,J,K))*AIR(I,J,K,NBLCK)
+     &    +       (TRT(I,J,K)+TRT(I-1,J,K))*AIT(I,J,K,NBLCK)
+     &    +       (TRX(I,J,K)+TRX(I-1,J,K))*AIX(I,J,K,NBLCK))
+      FORCER(I-1,J,K)  = FORCER(I-1,J,K) + RFOR
+      FORCER(I,J,K)    = FORCER(I,J,K)   - RFOR
+
+      TFOR = 0.5*((TTR(I,J,K)+TTR(I-1,J,K))*AIR(I,J,K,NBLCK)
+     &    +       (TTT(I,J,K)+TTT(I-1,J,K))*AIT(I,J,K,NBLCK)
+     &    +       (TTX(I,J,K)+TTX(I-1,J,K))*AIX(I,J,K,NBLCK))
+      FORCET(I-1,J,K)  = FORCET(I-1,J,K) + TFOR
+      FORCET(I,J,K)    = FORCET(I,J,K)   - TFOR
+C
+C     SET THE HEAT FLOW AND VISCOUS WORK
+C
+      QFLOW =  0.5*((QXX(I,J,K) + QXX(I-1,J,K))*AIX(I,J,K,NBLCK)
+     &      +       (QRR(I,J,K) + QRR(I-1,J,K))*AIR(I,J,K,NBLCK)
+     &      +       (QTT(I,J,K) + QTT(I-1,J,K))*AIT(I,J,K,NBLCK))
+      VXAVG = VX(I,J,K)+VX(I,J+1,K)+VX(I,J+1,K+1)+VX(I,J,K+1)
+      VRAVG = VR(I,J,K)+VR(I,J+1,K)+VR(I,J+1,K+1)+VR(I,J,K+1)
+      VTAVG = VT(I,J,K)+VT(I,J+1,K)+VT(I,J+1,K+1)+VT(I,J,K+1)
+
+      WVISC = -0.25*(XFOR*VXAVG + RFOR*VRAVG + TFOR*VTAVG)
+
+      QSOURCE(I,J,K)  = QSOURCE(I,J,K)   + QFLOW + WVISC
+      QSOURCE(I-1,J,K)= QSOURCE(I-1,J,K) - QFLOW - WVISC 
+
+  250 CONTINUE
+C
+C
+  200 CONTINUE
+C
+C
+C********CALCULATE THE WALL SHEAR STRESSES ON THE J = 1 and J = JM SURFACES***********
+C
+      DO 300 K=1,KMM1
+      DO 300 I=1,IMM1
+C
+C     FIRST FOR THE J = 1 WALL.
+C
+      IF(MWALLJ1(I,K,NBLCK).EQ.1) GO TO 310
+C
+      AREA1  = SQRT(AJX(I,1,K,NBLCK)*AJX(I,1,K,NBLCK) +
+     &              AJR(I,1,K,NBLCK)*AJR(I,1,K,NBLCK) +
+     &              AJT(I,1,K,NBLCK)*AJT(I,1,K,NBLCK))
+C
+      IF(ILOS.EQ.11) THEN
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOSS11
+C
+      VXAVG1 = VX(I,1,K)+VX(I+1,1,K)+VX(I+1,1,K+1)+VX(I,1,K+1)
+      VRAVG1 = VR(I,1,K)+VR(I+1,1,K)+VR(I+1,1,K+1)+VR(I,1,K+1)
+      VTAVG1 = VT(I,1,K)+VT(I+1,1,K)+VT(I+1,1,K+1)+VT(I,1,K+1)
+      ROAVG1 = RO(I,1,K)+RO(I+1,1,K)+RO(I+1,1,K+1)+RO(I,1,K+1)
+      RAVG1  = RBLK(I,1,K) + RBLK(I+1,1,K) + RBLK(I+1,1,K+1)
+     &       + RBLK(I,1,K+1)
+      WTAVG1 = VTAVG1 - WROTJ1(NBLCK)*RAVG1
+      WAVSQ  = VXAVG1*VXAVG1 + VRAVG1*VRAVG1 + WTAVG1*WTAVG1
+      WAVG   = SQRT(WAVSQ)
+      TWALLJ1= FMULT*WAVSQ*ROAVG1
+C
+      ENDIF
+C
+      IF(ILOS.EQ.9) THEN
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOSS9
+C
+      VXAVG1 = VX(I,2,K)+VX(I+1,2,K)+VX(I+1,2,K+1)+VX(I,2,K+1)
+      VRAVG1 = VR(I,2,K)+VR(I+1,2,K)+VR(I+1,2,K+1)+VR(I,2,K+1)
+      VTAVG1 = VT(I,2,K)+VT(I+1,2,K)+VT(I+1,2,K+1)+VT(I,2,K+1)
+      ROAVG1 = RO(I,2,K)+RO(I+1,2,K)+RO(I+1,2,K+1)+RO(I,2,K+1)
+      RAVG1  = RBLK(I,2,K) + RBLK(I+1,2,K) + RBLK(I+1,2,K+1)
+     &       + RBLK(I,2,K+1)
+      WTAVG1 = VTAVG1 - WROTJ1(NBLCK)*RAVG1
+      WAVG   = SQRT(VXAVG1*VXAVG1 + VRAVG1*VRAVG1 + WTAVG1*WTAVG1)
+C
+      DPERP   = VOL(I,1,K,NBLCK)/AREA1
+      RE      = DPERP*ROAVG1*WAVG/VISLAM16
+      RELOG   = 1./ALOG(RE)
+      CFWALL  = -0.000883 + 0.01588*RELOG + 0.12807*RELOG*RELOG
+      IF(RE.LT.125.0)  CFWALL =  1.0/RE
+      TWALLJ1  = CFWALL*ROAVG1*WAVG*WAVG/64.
+C
+      ENDIF
+C
+      XFORCE1 = -TWALLJ1*AREA1*VXAVG1/WAVG
+      RFORCE1 = -TWALLJ1*AREA1*VRAVG1/WAVG
+      TFORCE1 = -TWALLJ1*AREA1*WTAVG1/WAVG
+C     QFLOW1  = 0.0
+      WVISC1  =  TFORCE1*WROTJ1(NBLCK)*0.25*RAVG1
+C
+      FORCEX(I,1,K)    = FORCEX(I,1,K)    + XFORCE1
+      FORCER(I,1,K)    = FORCER(I,1,K)    + RFORCE1
+      FORCET(I,1,K)    = FORCET(I,1,K)    + TFORCE1
+      QSOURCE(I,1,K)   = QSOURCE(I,1,K)   + WVISC1
+C
+  310 CONTINUE
+C
+C**************NOW FOR THE J = JM WALL*******************************
+C
+      IF(MWALLJM(I,K,NBLCK).EQ.1) GO TO 320
+C
+      AREAJM  = SQRT(AJX(I,JM,K,NBLCK)*AJX(I,JM,K,NBLCK) +
+     &               AJR(I,JM,K,NBLCK)*AJR(I,JM,K,NBLCK) +
+     &               AJT(I,JM,K,NBLCK)*AJT(I,JM,K,NBLCK))
+C
+      IF(ILOS.EQ.11) THEN
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOSS11
+C
+      VXAVGJM = VX(I,JM,K)+VX(I+1,JM,K)+VX(I+1,JM,K+1)+VX(I,JM,K+1)
+      VRAVGJM = VR(I,JM,K)+VR(I+1,JM,K)+VR(I+1,JM,K+1)+VR(I,JM,K+1)
+      VTAVGJM = VT(I,JM,K)+VT(I+1,JM,K)+VT(I+1,JM,K+1)+VT(I,JM,K+1)
+      ROAVGJM = RO(I,JM,K)+RO(I+1,JM,K)+RO(I+1,JM,K+1)+RO(I,JM,K+1)
+      RAVGJM  = RBLK(I,JM,K) + RBLK(I+1,JM,K)+ RBLK(I+1,JM,K+1)
+     &        + RBLK(I,JM,K+1)
+      WTAVGJM = VTAVGJM - WROTJM(NBLCK)*RAVGJM
+      WAVSQ   = VXAVGJM*VXAVGJM+VRAVGJM*VRAVGJM+WTAVGJM*WTAVGJM
+      WAVG    = SQRT(WAVSQ)
+      TWALLJM = FMULT*WAVSQ*ROAVGJM
+C
+      ENDIF
+C
+      IF(ILOS.EQ.9) THEN
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOSS9
+C
+      VXAVGJM = VX(I,JMM1,K)+VX(I+1,JMM1,K)
+     &        + VX(I+1,JMM1,K+1)+VX(I,JMM1,K+1)
+      VRAVGJM = VR(I,JMM1,K)+VR(I+1,JMM1,K)
+     &        + VR(I+1,JMM1,K+1)+VR(I,JMM1,K+1)
+      VTAVGJM = VT(I,JMM1,K)+VT(I+1,JMM1,K)
+     &        + VT(I+1,JMM1,K+1)+VT(I,JMM1,K+1)
+      ROAVGJM = RO(I,JMM1,K)+RO(I+1,JMM1,K)
+     &        + RO(I+1,JMM1,K+1)+RO(I,JMM1,K+1)
+      RAVGJM  = RBLK(I,JMM1,K) + RBLK(I+1,JMM1,K)
+     &        + RBLK(I+1,JMM1,K+1) + RBLK(I,JMM1,K+1)
+      WTAVGJM = VTAVGJM - WROTJM(NBLCK)*RAVGJM
+      WAVG    = SQRT(VXAVGJM*VXAVGJM+VRAVGJM*VRAVGJM+WTAVGJM*WTAVGJM)
+C
+      DPERP   = VOL(I,JMM1,K,NBLCK)/AREAJM
+      RE      = DPERP*ROAVGJM*WAVG/VISLAM16
+      RELOG   = 1./ALOG(RE)
+      CFWALL  = -0.000883 + 0.01588*RELOG + 0.12807*RELOG*RELOG
+      IF(RE.LT.125.0)  CFWALL =  1.0/RE
+      TWALLJM  = CFWALL*ROAVGJM*WAVG*WAVG/64.
+C
+      ENDIF
+C
+      XFORCEJM = -TWALLJM*AREAJM*VXAVGJM/WAVG
+      RFORCEJM = -TWALLJM*AREAJM*VRAVGJM/WAVG
+      TFORCEJM = -TWALLJM*AREAJM*WTAVGJM/WAVG
+      WVISCJM  =  TFORCEJM*0.25*WROTJM(NBLCK)*RAVGJM
+C     QFLOWJM  = 0.0
+C
+      FORCEX(I,JMM1,K) = FORCEX(I,JMM1,K) + XFORCEJM
+      FORCER(I,JMM1,K) = FORCER(I,JMM1,K) + RFORCEJM
+      FORCET(I,JMM1,K) = FORCET(I,JMM1,K) + TFORCEJM
+      QSOURCE(I,JMM1,K)= QSOURCE(I,JMM1,K)+ WVISCJM
+C
+  320 CONTINUE
+C
+C     NOW SUM THE STRESSES ON THE OTHER J = CONSTANT FACES
+C
+      DO 350 J=2,JMM1
+
+      XFOR = 0.5*((TXR(I,J,K)+TXR(I,J-1,K))*AJR(I,J,K,NBLCK)
+     &    +       (TXT(I,J,K)+TXT(I,J-1,K))*AJT(I,J,K,NBLCK)
+     &    +       (TXX(I,J,K)+TXX(I,J-1,K))*AJX(I,J,K,NBLCK))
+      FORCEX(I,J-1,K) = FORCEX(I,J-1,K) + XFOR
+      FORCEX(I,J,K)   = FORCEX(I,J,K)   - XFOR
+
+      RFOR = 0.5*((TRR(I,J,K)+TRR(I,J-1,K))*AJR(I,J,K,NBLCK)
+     &    +       (TRT(I,J,K)+TRT(I,J-1,K))*AJT(I,J,K,NBLCK)
+     &    +       (TRX(I,J,K)+TRX(I,J-1,K))*AJX(I,J,K,NBLCK))
+      FORCER(I,J-1,K)  = FORCER(I,J-1,K) + RFOR
+      FORCER(I,J,K)    = FORCER(I,J,K)   - RFOR
+
+      TFOR = 0.5*((TTR(I,J,K)+TTR(I,J-1,K))*AJR(I,J,K,NBLCK)
+     &    +       (TTT(I,J,K)+TTT(I,J-1,K))*AJT(I,J,K,NBLCK)
+     &    +       (TTX(I,J,K)+TTX(I,J-1,K))*AJX(I,J,K,NBLCK))
+      FORCET(I,J-1,K)  = FORCET(I,J-1,K) + TFOR
+      FORCET(I,J,K)    = FORCET(I,J,K)   - TFOR
+
+C
+C     SET THE HEAT FLOW AND VISCOUS WORK
+C
+      QFLOW =  0.5*((QXX(I,J,K) + QXX(I,J-1,K))*AJX(I,J,K,NBLCK)
+     &      +       (QRR(I,J,K) + QRR(I,J-1,K))*AJR(I,J,K,NBLCK)
+     &      +       (QTT(I,J,K) + QTT(I,J-1,K))*AJT(I,J,K,NBLCK))
+
+      VXAVG = VX(I,J,K)+VX(I+1,J,K)+VX(I+1,J,K+1)+VX(I,J,K+1)
+      VRAVG = VR(I,J,K)+VR(I+1,J,K)+VR(I+1,J,K+1)+VR(I,J,K+1)
+      VTAVG = VT(I,J,K)+VT(I+1,J,K)+VT(I+1,J,K+1)+VT(I,J,K+1)
+
+      WVISC = -0.25*(XFOR*VXAVG + RFOR*VRAVG + TFOR*VTAVG)
+
+      QSOURCE(I,J,K)  = QSOURCE(I,J,K)   + QFLOW + WVISC
+      QSOURCE(I,J-1,K)= QSOURCE(I,J-1,K) - QFLOW - WVISC 
+
+  350 CONTINUE
+C
+  300 CONTINUE
+C
+C
+C**********CALCULATE THE WALL SHEAR STRESSES ON THE K = 1 and K = KM SURFACES**********
+C
+      IF(NBLCK.EQ.1) THEN
+           VLIFT = 0.0
+           VDRAG = 0.0
+           AWING = 0.0
+      END IF
+C
+      DO 400 J=1,JMM1
+      DO 400 I=1,IMM1
+C
+C
+      IF(MWALLK1(I,J,NBLCK).EQ.1) GO TO 410
+C
+C     FIRST FOR THE K = 1 WALL.
+C
+      AREA1  = SQRT(AKX(I,J,1,NBLCK)*AKX(I,J,1,NBLCK) +
+     &              AKR(I,J,1,NBLCK)*AKR(I,J,1,NBLCK) +
+     &              AKT(I,J,1,NBLCK)*AKT(I,J,1,NBLCK))
+C
+      IF(NBLCK.EQ.2)   AWING = AWING + AREA1
+C
+      IF(ILOS.EQ.11) THEN
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOSS11
+C
+      VXAVG1 = VX(I,J,1)+VX(I+1,J,1)+VX(I+1,J+1,1)+VX(I,J+1,1)
+      VRAVG1 = VR(I,J,1)+VR(I+1,J,1)+VR(I+1,J+1,1)+VR(I,J+1,1)
+      VTAVG1 = VT(I,J,1)+VT(I+1,J,1)+VT(I+1,J+1,1)+VT(I,J+1,1)
+      ROAVG1 = RO(I,J,1)+RO(I+1,J,1)+RO(I+1,J+1,1)+RO(I,J+1,1)
+      RAVG1  = RBLK(I,J,1) + RBLK(I+1,J,1) + RBLK(I+1,J+1,1)
+     &       + RBLK(I,J+1,1)
+      WTAVG1 = VTAVG1 - WROTK1(NBLCK)*RAVG1
+      WAVSQ  = VXAVG1*VXAVG1 + VRAVG1*VRAVG1 + WTAVG1*WTAVG1
+      WAVG   = SQRT(WAVSQ)
+      TWALLK1= FMULT*WAVSQ*ROAVG1
+C
+      ENDIF
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOSS9
+C
+      IF(ILOS.EQ.9) THEN
+C
+      VXAVG1 = VX(I,J,2)+VX(I+1,J,2)+VX(I+1,J+1,2)+VX(I,J+1,2)
+      VRAVG1 = VR(I,J,2)+VR(I+1,J,2)+VR(I+1,J+1,2)+VR(I,J+1,2)
+      VTAVG1 = VT(I,J,2)+VT(I+1,J,2)+VT(I+1,J+1,2)+VT(I,J+1,2)
+      ROAVG1 = RO(I,J,2)+RO(I+1,J,2)+RO(I+1,J+1,2)+RO(I,J+1,2)
+      RAVG1  = RBLK(I,J,2) + RBLK(I+1,J,2) + RBLK(I+1,J+1,2)
+     &       + RBLK(I,J+1,2)
+      WTAVG1 = VTAVG1 - WROTK1(NBLCK)*RAVG1
+      WAVG   = SQRT(VXAVG1*VXAVG1 + VRAVG1*VRAVG1 + WTAVG1*WTAVG1)
+C
+      DPERP   = VOL(I,J,1,NBLCK)/AREA1
+      RE      = DPERP*ROAVG1*WAVG/VISLAM16
+      RELOG   = 1./ALOG(RE)
+      CFWALL  = -0.000883 + 0.01588*RELOG + 0.12807*RELOG*RELOG
+      IF(RE.LT.125.0)  CFWALL =  1.0/RE
+      TWALLK1 = CFWALL*ROAVG1*WAVG*WAVG/64.
+C
+      ENDIF
+C
+      XFORCE1 = -TWALLK1*AREA1*VXAVG1/WAVG
+      RFORCE1 = -TWALLK1*AREA1*VRAVG1/WAVG
+      TFORCE1 = -TWALLK1*AREA1*WTAVG1/WAVG
+C      QFLOW1  = 0.0
+      WVISC1  = TFORCE1*0.25*WROTK1(NBLCK)*RAVG1
+C
+      FORCEX(I,J,1)    = FORCEX(I,J,1)    + XFORCE1
+      FORCER(I,J,1)    = FORCER(I,J,1)    + RFORCE1
+      FORCET(I,J,1)    = FORCET(I,J,1)    + TFORCE1
+      QSOURCE(I,J,1)   = QSOURCE(I,J,1)   + WVISC1
+C
+      IF(NBLCK.EQ.2) THEN
+           VLIFT = VLIFT - TFORCE1
+           VDRAG = VDRAG - XFORCE1
+      END IF
+C
+  410 CONTINUE
+C
+C
+C**************NOW FOR THE K = KM WALL**********************************
+C
+      IF(MWALLKM(I,J,NBLCK).EQ.1) GO TO 420
+C
+      AREAKM  = SQRT(AKX(I,J,KM,NBLCK)*AKX(I,J,KM,NBLCK) +
+     &               AKR(I,J,KM,NBLCK)*AKR(I,J,KM,NBLCK) +
+     &               AKT(I,J,KM,NBLCK)*AKT(I,J,KM,NBLCK))
+C
+       IF(ILOS.EQ.11)  THEN
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOS11
+C
+      VXAVGKM = VX(I,J,KM)+VX(I+1,J,KM)+VX(I+1,J+1,KM)+VX(I,J+1,KM)
+      VRAVGKM = VR(I,J,KM)+VR(I+1,J,KM)+VR(I+1,J+1,KM)+VR(I,J+1,KM)
+      VTAVGKM = VT(I,J,KM)+VT(I+1,J,KM)+VT(I+1,J+1,KM)+VT(I,J+1,KM)
+      ROAVGKM = RO(I,J,KM)+RO(I+1,J,KM)+RO(I+1,J+1,KM)+RO(I,J+1,KM)
+      RAVGKM  = RBLK(I,J,KM) + RBLK(I+1,J,KM)
+     &        + RBLK(I+1,J+1,KM) + RBLK(I,J+1,KM)
+      WTAVGKM = VTAVGKM - WROTKM(NBLCK)*RAVGKM
+      WAVSQ   = VXAVGKM*VXAVGKM + VRAVGKM*VRAVGKM + WTAVGKM*WTAVGKM
+      WAVG    = SQRT(WAVSQ)
+      TWALLKM = FMULT*WAVSQ*ROAVGKM
+C
+      ENDIF
+C
+      IF(ILOS.EQ.9) THEN
+C
+C     CALCULATE THE WALL SHEAR STRESS USING LOSS9
+C
+      VXAVGKM = VX(I,J,KMM1)+VX(I+1,J,KMM1)
+     &        + VX(I+1,J+1,KMM1)+VX(I,J+1,KMM1)
+      VRAVGKM = VR(I,J,KMM1)+VR(I+1,J,KMM1)
+     &        + VR(I+1,J+1,KMM1)+VR(I,J+1,KMM1)
+      VTAVGKM = VT(I,J,KMM1)+VT(I+1,J,KMM1)
+     &        + VT(I+1,J+1,KMM1)+VT(I,J+1,KMM1)
+      ROAVGKM = RO(I,J,KMM1)+RO(I+1,J,KMM1)
+     &        + RO(I+1,J+1,KMM1)+RO(I,J+1,KMM1)
+      RAVGKM  = RBLK(I,J,KMM1) + RBLK(I+1,J,KMM1)
+     &        + RBLK(I+1,J+1,KMM1) + RBLK(I,J+1,KMM1)
+      WTAVGKM = VTAVGKM - WROTKM(NBLCK)*RAVGKM
+      WAVG    = SQRT(VXAVGKM*VXAVGKM+VRAVGKM*VRAVGKM+WTAVGKM*WTAVGKM)
+C
+      DPERP   = VOL(I,J,KMM1,NBLCK)/AREAKM
+      RE      = DPERP*ROAVGKM*WAVG/VISLAM16
+      RELOG   = 1./ALOG(RE)
+      CFWALL  = -0.000883 + 0.01588*RELOG + 0.12807*RELOG*RELOG
+      IF(RE.LT.125.0)  CFWALL =  1.0/RE
+      TWALLKM = CFWALL*ROAVGKM*WAVG*WAVG/64.
+C
+      ENDIF
+C
+      XFORCEKM = -TWALLKM*AREAKM*VXAVGKM/WAVG
+      RFORCEKM = -TWALLKM*AREAKM*VRAVGKM/WAVG
+      TFORCEKM = -TWALLKM*AREAKM*WTAVGKM/WAVG
+C     QFLOWKM  = 0.0
+      WVISCKM  =  TFORCEKM*0.25*WROTKM(NBLCK)*RAVGKM
+C
+      FORCEX(I,J,KMM1) = FORCEX(I,J,KMM1) + XFORCEKM
+      FORCER(I,J,KMM1) = FORCER(I,J,KMM1) + RFORCEKM
+      FORCET(I,J,KMM1) = FORCET(I,J,KMM1) + TFORCEKM
+      QSOURCE(I,J,KMM1)= QSOURCE(I,J,KMM1)+ WVISCKM
+C
+C
+      IF(NBLCK.EQ.1) THEN
+           VLIFT = VLIFT - TFORCEKM
+           VDRAG = VDRAG - XFORCEKM
+      END IF
+C
+C
+  420 CONTINUE
+C
+C     NOW SUM THE STRESSES ON THE OTHER K = CONSTANT FACES
+C
+      DO 450 K=2,KMM1
+
+      XFOR = 0.5*((TXR(I,J,K)+TXR(I,J,K-1))*AKR(I,J,K,NBLCK)
+     &    +       (TXT(I,J,K)+TXT(I,J,K-1))*AKT(I,J,K,NBLCK)
+     &    +       (TXX(I,J,K)+TXX(I,J,K-1))*AKX(I,J,K,NBLCK))
+      FORCEX(I,J,K-1) = FORCEX(I,J,K-1) + XFOR
+      FORCEX(I,J,K)   = FORCEX(I,J,K)   - XFOR
+
+      RFOR = 0.5*((TRR(I,J,K)+TRR(I,J,K-1))*AKR(I,J,K,NBLCK)
+     &    +       (TRT(I,J,K)+TRT(I,J,K-1))*AKT(I,J,K,NBLCK)
+     &    +       (TRX(I,J,K)+TRX(I,J,K-1))*AKX(I,J,K,NBLCK))
+      FORCER(I,J,K-1)  = FORCER(I,J,K-1) + RFOR
+      FORCER(I,J,K)    = FORCER(I,J,K)   - RFOR
+
+      TFOR = 0.5*((TTR(I,J,K)+TTR(I,J,K-1))*AKR(I,J,K,NBLCK)
+     &    +       (TTT(I,J,K)+TTT(I,J,K-1))*AKT(I,J,K,NBLCK)
+     &    +       (TTX(I,J,K)+TTX(I,J,K-1))*AKX(I,J,K,NBLCK))
+      FORCET(I,J,K-1)  = FORCET(I,J,K-1) + TFOR
+      FORCET(I,J,K)    = FORCET(I,J,K)   - TFOR
+C
+C     SET THE HEAT FLOW AND VISCOUS WORK
+C
+      QFLOW =  0.5*((QXX(I,J,K) + QXX(I,J,K-1))*AKX(I,J,K,NBLCK)
+     &      +       (QRR(I,J,K) + QRR(I,J,K-1))*AKR(I,J,K,NBLCK)
+     &      +       (QTT(I,J,K) + QTT(I,J,K-1))*AKT(I,J,K,NBLCK))
+
+      VXAVG = VX(I,J,K)+VX(I+1,J,K)+VX(I+1,J+1,K)+VX(I,J+1,K)
+      VRAVG = VR(I,J,K)+VR(I+1,J,K)+VR(I+1,J+1,K)+VR(I,J+1,K)
+      VTAVG = VT(I,J,K)+VT(I+1,J,K)+VT(I+1,J+1,K)+VT(I,J+1,K)
+
+      WVISC = -0.25*(XFOR*VXAVG + RFOR*VRAVG + TFOR*VTAVG)
+
+      QSOURCE(I,J,K)  = QSOURCE(I,J,K)   + QFLOW + WVISC
+      QSOURCE(I,J,K-1)= QSOURCE(I,J,K-1) - QFLOW - WVISC 
+C
+  450 CONTINUE
+C
+  400 CONTINUE
+C
+C     ALL THE VISCOUS FORCES ARE NOW SET. USE THEM TO UPDATE THE
+C     GLOBAL BODY FORCE TERMS
+C
+C 
+      RFVIS1 = 1.0 - RFVIS
+      RFVIS8 = 0.125*RFVIS
+      DO 500 K=1,KMM1
+      DO 500 J=1,JMM1
+      DO 500 I=1,IMM1
+      RAVG = RBLK(I,J,K)      + RBLK(I+1,J,K) + RBLK(I,J+1,K)
+     &     + RBLK(I+1,J+1,K)  + RBLK(I,J,K+1) + RBLK(I+1,J,K+1)
+     &     + RBLK(I,J+1,K+1)  + RBLK(I+1,J+1,K+1)
+      XFORCE(I,J,K,NBLCK)   = RFVIS1*XFORCE(I,J,K,NBLCK)
+     &                      + RFVIS*FORCEX(I,J,K)
+      TFORCE(I,J,K,NBLCK)   = RFVIS1*TFORCE(I,J,K,NBLCK)
+     &                      + RFVIS8*FORCET(I,J,K)*RAVG
+      RFORCE(I,J,K,NBLCK)   = RFVIS1*RFORCE(I,J,K,NBLCK)
+     &                      + RFVIS*FORCER(I,J,K)
+      ENSOURCE(I,J,K,NBLCK) = RFVIS1*ENSOURCE(I,J,K,NBLCK)
+     &                      + RFVIS*QSOURCE(I,J,K)
+  500 CONTINUE
+C
+C
+C
+C***********************************************************************************
+C
+C     MAKE THE VISCOUS FORCES CONTINUOUS AT PERIODIC PATCHES. BUT NOT ON THE FIRST
+C     CALL BECAUSE THE FORCES IN THE ADJACENT PATCH MAY NOT YET HAVE BEEN SET.
+C
+      IF(NSTEP.LE.NLOS) RETURN
+C
+      DO 600 NPTCH = 1,NPATCH(NBLCK)
+C
+C     WARNING! CURRENTLY ONLY DO THIS IF THE PATCHES MATCH AND ARE ON THE SAME TYPE OF FACE.
+C
+      IF(  (NEXT_I(NPTCH,NBLCK).EQ.'+I'.OR.NEXT_I(NPTCH,NBLCK).EQ.'+i')
+     &.AND.(NEXT_J(NPTCH,NBLCK).EQ.'+J'.OR.NEXT_J(NPTCH,NBLCK).EQ.'+j')
+     &.AND.(NEXT_K(NPTCH,NBLCK).EQ.'+K'.OR.NEXT_K(NPTCH,NBLCK).EQ.'+k'))
+     & THEN
+C
+      IF  (PATCHTYPE(NPTCH,NBLCK).EQ.'P'.
+     &  OR.PATCHTYPE(NPTCH,NBLCK).EQ.'B') THEN
+C
+      NXBLCK  =  NEXT_BLOCK(NPTCH,NBLCK)
+      NXPTCH  =  NEXT_PATCH(NPTCH,NBLCK)
+C
+      IS     =  IPATCHS(NPTCH,NBLCK)
+      IE     =  IPATCHE(NPTCH,NBLCK) 
+      JS     =  JPATCHS(NPTCH,NBLCK)
+      JE     =  JPATCHE(NPTCH,NBLCK)
+      KS     =  KPATCHS(NPTCH,NBLCK)
+      KE     =  KPATCHE(NPTCH,NBLCK)
+C
+      NXIS   =  IPATCHS(NXPTCH,NXBLCK)
+      NXIE   =  IPATCHE(NXPTCH,NXBLCK) 
+      NXJS   =  JPATCHS(NXPTCH,NXBLCK)
+      NXJE   =  JPATCHE(NXPTCH,NXBLCK)
+      NXKS   =  KPATCHS(NXPTCH,NXBLCK)
+      NXKE   =  KPATCHE(NXPTCH,NXBLCK) 
+C
+      IMX    = NI(NXBLCK)
+      JMX    = NJ(NXBLCK)
+      KMX    = NK(NXBLCK)
+C
+C     FIRST MAKE THE VISCOUS FORCES CONTINUOUS ON A PERIODIC
+C     PATCH ON THE "I" FACE.
+C
+      IF(IS.EQ.IE) THEN
+C
+      IF(IS.EQ.1)  THEN
+           IP  = 1
+           IIN = 2
+           ELSE
+           IP  = IMM1
+           IIN = IM-2 
+      ENDIF
+      IF(NXIS.EQ.1)  THEN
+           NXIP  = 1
+           ELSE
+           NXIP  = IMX - 1 
+      ENDIF    
+C
+      DO 650 K= KS,KE-1
+      KX      = NXKS + K - KS 
+      DO 650 J= JS,JE-1
+      JX      = NXJS + J - JS
+      VOLPH   = 0.5*VOL(IP,J,K,NBLCK)
+      VOLIN   = VOL(IIN,J,K,NBLCK)
+      VOLNX   = VOL(NXIP,JX,KX,NXBLCK) 
+      RVN     = VOLPH/VOLIN
+      RVX     = VOLPH/VOLNX
+      XFORCE(IP,J,K,NBLCK) = 0.5*(XFORCE(IP,J,K,NBLCK)
+     &                     +  RVN*XFORCE(IIN,J,K,NBLCK) 
+     &			   +  RVX*XFORCE(NXIP,JX,KX,NXBLCK))     
+      TFORCE(IP,J,K,NBLCK) = 0.5*(TFORCE(IP,J,K,NBLCK) 
+     &                     +  RVN*TFORCE(IIN,J,K,NBLCK)
+     &                     +  RVX*TFORCE(NXIP,JX,KX,NXBLCK))
+      RFORCE(IP,J,K,NBLCK) = 0.5*(RFORCE(IP,J,K,NBLCK)
+     &                     +  RVN*RFORCE(IIN,J,K,NBLCK) 
+     &			   +  RVX*RFORCE(NXIP,JX,KX,NXBLCK))
+      ENSOURCE(IP,J,K,NBLCK) = 0.5*(ENSOURCE(IP,J,K,NBLCK)
+     &                     +  RVN*ENSOURCE(IIN,J,K,NBLCK) 
+     &			   +  RVX*ENSOURCE(NXIP,JX,KX,NXBLCK))
+  650 CONTINUE  
+C
+      ENDIF     
+C
+C
+C
+C     NEXT MAKE THE VISCOUS FORCES CONTINUOUS ON A PERIODIC
+C     PATCH ON THE "J" FACE.
+C
+      IF(JS.EQ.JE) THEN
+C
+      IF(JS.EQ.1)  THEN
+           JP  = 1
+           JIN = 2
+           ELSE
+           JP  = JMM1
+           JIN = JM-2 
+      ENDIF
+      IF(NXJS.EQ.1)  THEN
+           NXJP  = 1
+           ELSE
+           NXJP  = JMX - 1 
+      ENDIF    
+C
+      DO 660 K= KS,KE-1
+      KX      = NXKS + K - KS 
+      DO 660 I= IS,IE-1
+      IX      = NXIS + I - IS
+      VOLPH   = 0.5*VOL(I,JP,K,NBLCK)
+      VOLIN   = VOL(I,JIN,K,NBLCK)
+      VOLNX   = VOL(IX,NXJP,KX,NXBLCK)
+      RVN     = VOLPH/VOLIN
+      RVX     = VOLPH/VOLNX 
+      XFORCE(I,JP,K,NBLCK) = 0.5*(XFORCE(I,JP,K,NBLCK)
+     &                     +  RVN*XFORCE(I,JIN,K,NBLCK) 
+     &                     +  RVX*XFORCE(IX,NXJP,KX,NXBLCK)) 
+      TFORCE(I,JP,K,NBLCK) = 0.5*(TFORCE(I,JP,K,NBLCK)
+     &                     +  RVN*TFORCE(I,JIN,K,NBLCK) 
+     &                     +  RVX*TFORCE(IX,NXJP,KX,NXBLCK)) 
+      RFORCE(I,JP,K,NBLCK) = 0.5*(RFORCE(I,JP,K,NBLCK)
+     &                     +  RVN*RFORCE(I,JIN,K,NBLCK) 
+     &                     +  RVX*RFORCE(IX,NXJP,KX,NXBLCK)) 
+      ENSOURCE(I,JP,K,NBLCK) = 0.5*(ENSOURCE(I,JP,K,NBLCK)
+     &                     +  RVN*ENSOURCE(I,JIN,K,NBLCK) 
+     &                     +  RVX*ENSOURCE(IX,NXJP,KX,NXBLCK)) 
+  660 CONTINUE  
+C
+      ENDIF
+C
+C
+C     NEXT MAKE THE VISCOUS FORCES CONTINUOUS ON A PERIODIC
+C     PATCH ON THE "K" FACE.
+C
+      IF(KS.EQ.KE) THEN
+C
+      IF(KS.EQ.1)  THEN
+           KP  = 1
+           KIN = 2
+           ELSE
+           KP  = KMM1
+           KIN = KM-2 
+      ENDIF
+      IF(NXKS.EQ.1)  THEN
+           NXKP  = 1
+           ELSE
+           NXKP  = KMX - 1 
+      ENDIF    
+C
+      DO 670 I= IS,IE-1
+      IX      = NXIS + I - IS 
+      DO 670 J= JS,JE-1
+      JX      = NXJS + J - JS
+      VOLPH   = 0.5*VOL(I,J,KP,NBLCK)
+      VOLIN   = VOL(I,J,KIN,NBLCK)
+      VOLNX   = VOL(IX,JX,NXKP,NXBLCK)
+      RVN     = VOLPH/VOLIN
+      RVX     = VOLPH/VOLNX 
+      XFORCE(I,J,KP,NBLCK) =  0.5*(XFORCE(I,J,KP,NBLCK)
+     &                     +   RVN*XFORCE(I,J,KIN,NBLCK)
+     &                     +   RVX*XFORCE(IX,JX,NXKP,NXBLCK)) 
+      TFORCE(I,J,KP,NBLCK) =  0.5*(TFORCE(I,J,KP,NBLCK)
+     &                     +   RVN*TFORCE(I,J,KIN,NBLCK)
+     &                     +   RVX*TFORCE(IX,JX,NXKP,NXBLCK)) 
+      RFORCE(I,J,KP,NBLCK) =  0.5*(RFORCE(I,J,KP,NBLCK)
+     &                     +   RVN*RFORCE(I,J,KIN,NBLCK)
+     &                     +   RVX*RFORCE(IX,JX,NXKP,NXBLCK)) 
+      ENSOURCE(I,J,KP,NBLCK) =  0.5*(ENSOURCE(I,J,KP,NBLCK)
+     &                     +   RVN*ENSOURCE(I,J,KIN,NBLCK)
+     &                     +   RVX*ENSOURCE(IX,JX,NXKP,NXBLCK)) 
+  670 CONTINUE  
+C
+      ENDIF     
+C
+C     END OF THIS PATCH PERIODIC FORCE SETTING.
+C
+      ENDIF  
+C
+      ENDIF
+C
+  600 CONTINUE   
+C
+C
+      RETURN
+      END
+C
+C************************************************************************
+C***********************************************************************
+C
+      SUBROUTINE GRADVEL(V,DVDX,DVDR,DVDT,I,J,K,NBLCK)
+C
+C    THIS SUBROUTINE CALCULATES THE VELOCITY GRADIENTS IN A CELL.
+C    NOTE THE VALUE OBTAINED IS 4 x THE TRUE VALUE. THIS IS
+C    ALLOWED FOR WHEN CALCULATING THE STRESSES
+C
+      INCLUDE 'commall-29'
+C
+      DIMENSION  V(NIM,NJM,NKM)
+C
+      IP1 = I+1
+      JP1 = J+1
+      KP1 = K+1
+      RVOL  = 0.25/VOL(I,J,K,NBLCK)
+C
+      VAVGI1  = V(I,J,K)   + V(I,JP1,K)   + V(I,JP1,KP1)   +V(I,J,KP1)
+      VAVGI2  = V(IP1,J,K) + V(IP1,JP1,K) + V(IP1,JP1,KP1) +V(IP1,J,KP1)
+      VAVGJ1  = V(I,J,K)   + V(IP1,J,K)   + V(IP1,J,KP1)   +V(I,J,KP1)
+      VAVGJ2  = V(I,JP1,K) + V(IP1,JP1,K) + V(IP1,JP1,KP1) +V(I,JP1,KP1)
+      VAVGK1  = V(I,J,K)   + V(IP1,J,K)   + V(IP1,JP1,K)   +V(I,JP1,K)
+      VAVGK2  = V(I,J,KP1) + V(IP1,J,KP1) + V(IP1,JP1,KP1) +V(I,JP1,KP1)
+C
+      DVDX = -(VAVGI1*AIX(I,J,K,NBLCK) - VAVGI2*AIX(IP1,J,K,NBLCK)
+     &       + VAVGJ1*AJX(I,J,K,NBLCK) - VAVGJ2*AJX(I,JP1,K,NBLCK)
+     &       + VAVGK1*AKX(I,J,K,NBLCK) - VAVGK2*AKX(I,J,KP1,NBLCK))*RVOL
+C
+      DVDR = -(VAVGI1*AIR(I,J,K,NBLCK) - VAVGI2*AIR(IP1,J,K,NBLCK)
+     &       + VAVGJ1*AJR(I,J,K,NBLCK) - VAVGJ2*AJR(I,JP1,K,NBLCK)
+     &       + VAVGK1*AKR(I,J,K,NBLCK) - VAVGK2*AKR(I,J,KP1,NBLCK))*RVOL
+C
+      DVDT = -(VAVGI1*AIT(I,J,K,NBLCK) - VAVGI2*AIT(IP1,J,K,NBLCK)
+     &       + VAVGJ1*AJT(I,J,K,NBLCK) - VAVGJ2*AJT(I,JP1,K,NBLCK)
+     &       + VAVGK1*AKT(I,J,K,NBLCK) - VAVGK2*AKT(I,J,KP1,NBLCK))*RVOL
+C
+      RETURN
+      END
+C
+C************************************************************************************
+C***********************************************************************************************
+C
+      SUBROUTINE SMOOTH_GRID(NBLCK)
+C
+      INCLUDE 'commall-29'
+C
+      DIMENSION  TEMPX(200),TEMPR(200),TEMPT(200)
+C
+C     Smooth the grid points such that the block boundaries and the patch boundaries do not move.
+C
+      IM   = NI(NBLCK)
+      JM   = NJ(NBLCK)
+      KM   = NK(NBLCK)
+      IMM1 = IM-1
+      JMM1 = JM-1
+      KMM1 = KM-1
+      SF   = 0.5
+      SFH  = 0.5*SF
+      SF1  = 1.0 - SF
+C
+C     FIRST SMOOTH THE GRID IN THE I DIRECTION
+C
+      DO 100 J=1,JM
+      DO 100 K=1,KM
+C
+      DO 110 I=2,IMM1
+      TEMPX(I) = SF1*X(I,J,K,NBLCK) + SFH*(X(I+1,J,K,NBLCK)
+     &         + X(I-1,J,K,NBLCK))
+      TEMPR(I) = SF1*R(I,J,K,NBLCK) + SFH*(R(I+1,J,K,NBLCK)
+     &         + R(I-1,J,K,NBLCK))
+      TEMPT(I) = SF1*RT(I,J,K,NBLCK)+ SFH*(RT(I+1,J,K,NBLCK)
+     &         + RT(I-1,J,K,NBLCK))
+  110 CONTINUE
+C
+      DO 120 I=2,IMM1
+      FAC  = SPAREVAR(I,J,K,NBLCK)
+      FAC1 = 1. -FAC
+      X(I,J,K,NBLCK)  = FAC1*X(I,J,K,NBLCK)  + FAC*TEMPX(I)
+      R(I,J,K,NBLCK)  = FAC1*R(I,J,K,NBLCK)  + FAC*TEMPR(I)
+      RT(I,J,K,NBLCK) = FAC1*RT(I,J,K,NBLCK) + FAC*TEMPT(I)
+  120 CONTINUE
+C
+  100 CONTINUE
+
+C
+C     NEXT SMOOTH THE GRID IN THE J DIRECTION
+C
+      DO 200 I=1,IM
+      DO 200 K=1,KM
+C
+      DO 210 J=2,JMM1
+      TEMPX(J) = SF1*X(I,J,K,NBLCK) + SFH*(X(I,J+1,K,NBLCK)
+     &         + X(I,J-1,K,NBLCK))
+      TEMPR(J) = SF1*R(I,J,K,NBLCK) + SFH*(R(I,J+1,K,NBLCK)
+     &         + R(I,J-1,K,NBLCK))
+      TEMPT(J) = SF1*RT(I,J,K,NBLCK)+ SFH*(RT(I,J+1,K,NBLCK)
+     &         + RT(I,J-1,K,NBLCK))
+  210 CONTINUE
+C
+      DO 220 J=2,JMM1
+      FAC  = SPAREVAR(I,J,K,NBLCK)
+      FAC1 = 1. -FAC
+      X(I,J,K,NBLCK)  = FAC1*X(I,J,K,NBLCK)  + FAC*TEMPX(J)
+      R(I,J,K,NBLCK)  = FAC1*R(I,J,K,NBLCK)  + FAC*TEMPR(J)
+      RT(I,J,K,NBLCK) = FAC1*RT(I,J,K,NBLCK) + FAC*TEMPT(J)
+  220 CONTINUE
+C
+  200 CONTINUE
+C
+C     NEXT SMOOTH THE GRID IN THE K DIRECTION
+C
+      DO 300 I=1,IM
+      DO 300 J=1,JM
+C
+      DO 310 K=2,KMM1
+      TEMPX(K) = SF1*X(I,J,K,NBLCK) + SFH*(X(I,J,K+1,NBLCK)
+     &         + X(I,J,K-1,NBLCK))
+      TEMPR(K) = SF1*R(I,J,K,NBLCK) + SFH*(R(I,J,K+1,NBLCK)
+     &         + R(I,J,K-1,NBLCK))
+      TEMPT(K) = SF1*RT(I,J,K,NBLCK)+ SFH*(RT(I,J,K+1,NBLCK)
+     &         + RT(I,J,K-1,NBLCK))
+  310 CONTINUE
+C
+      DO 320 K=2,KMM1
+      FAC  = SPAREVAR(I,J,K,NBLCK)
+      FAC1 = 1. -FAC
+      X(I,J,K,NBLCK)  = FAC1*X(I,J,K,NBLCK)  + FAC*TEMPX(K)
+      R(I,J,K,NBLCK)  = FAC1*R(I,J,K,NBLCK)  + FAC*TEMPR(K)
+      RT(I,J,K,NBLCK) = FAC1*RT(I,J,K,NBLCK) + FAC*TEMPT(K)
+  320 CONTINUE
+C
+  300 CONTINUE
+C
+C
+      RETURN
+      END
+C************************************************************************************
+C************************************************************************************
+C
+      SUBROUTINE GRIDINT(NBLCK)
+C
+C     This subroutine generates a structured 3D grid from unstructured data.
+C     The grid is specified by an unstructured table of I,J,K  X,R,R-theta values.
+C     Structured grid generation is then done by regarding each coordinate,
+C     X, R, R-theta, as a function of the grid indices I,J,K. 
+C     Three dimensional interpolation, using shape functions is
+C     then used to calculate X,R,R-theta  at all the I,J,K values of the structured
+C     grid.
+C
+C
+      INCLUDE 'commall-29'
+C
+       DIMENSION  A(NMATRIX,NMATRIX),
+     &        INDX(NMATRIX),IVAL(NMATRIX),JVAL(NMATRIX),
+     &        KVAL(NMATRIX),XVAL(NMATRIX),YVAL(NMATRIX),
+     &        ZVAL(NMATRIX)
+C
+      REAL*8 IVAL,JVAL,KVAL,IMAX,JMAX,KMAX,IMIN,JMIN,KMIN,
+     &       IRANGE,JRANGE,KRANGE
+C
+      DOUBLE PRECISION A,XVAL,YVAL,ZVAL
+C
+      NDIM    = NMATRIX
+      NPOINTS = NPINPUT(NBLCK)
+      POWER   = EXPO(NBLCK)
+C
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+      IMM1 = IM-1
+      JMM1 = JM-1
+      KMM1 = KM-1
+C
+C   TURN THE INPUT I,J,K  X, R, R-theta  into one-dimensional arrays.
+C
+      DO 1  N = 1,NPOINTS
+      IVAL(N) = IGIN(N,NBLCK)
+      JVAL(N) = JGIN(N,NBLCK)
+      KVAL(N) = KGIN(N,NBLCK)
+      XVAL(N) = XGIN(N,NBLCK)
+      YVAL(N) = RGIN(N,NBLCK)
+      ZVAL(N) = RTGIN(N,NBLCK)
+    1 CONTINUE
+      
+C
+C     Find the maximaum and minimum of all variables, I,J,K  X, R, R-theta.
+C
+      IMAX = -100000
+      IMIN =  100000
+      JMAX = -100000
+      JMIN =  100000
+      KMAX = -100000
+      KMIN =  100000
+      XMAX = -100000.
+      XMIN =  100000.
+      YMAX = -100000.
+      YMIN =  100000.
+      ZMAX = -100000.
+      ZMIN =  100000.
+C
+      DO 77 N=1,NPOINTS
+      IF(IVAL(N).GT.IMAX)    IMAX = IVAL(N)
+      IF(IVAL(N).LT.IMIN)    IMIN = IVAL(N)
+      IF(JVAL(N).GT.JMAX)    JMAX = JVAL(N)
+      IF(JVAL(N).LT.JMIN)    JMIN = JVAL(N)
+      IF(KVAL(N).GT.KMAX)    KMAX = KVAL(N)
+      IF(KVAL(N).LT.KMIN)    KMIN = KVAL(N)
+      IF(XVAL(N).GT.XMAX)    XMAX = XVAL(N)
+      IF(XVAL(N).LT.XMIN)    XMIN = XVAL(N)
+      IF(YVAL(N).GT.YMAX)    YMAX = YVAL(N)
+      IF(YVAL(N).LT.YMIN)    YMIN = YVAL(N)
+      IF(ZVAL(N).GT.ZMAX)    ZMAX = ZVAL(N)
+      IF(ZVAL(N).LT.ZMIN)    ZMIN = ZVAL(N)
+   77 CONTINUE
+C 
+C
+      IRANGE = IMAX - IMIN
+      JRANGE = JMAX - JMIN
+      KRANGE = KMAX - KMIN
+C
+C    START THE OUTER LOOP OVER ALL INPUT POINTS.
+C
+      DO 50 N1= 1,NPOINTS
+C
+      VINODE  = IVAL(N1)
+      VJNODE  = JVAL(N1)
+      VKNODE  = KVAL(N1) 
+C
+C    START THE INNER LOOP OVER ALL INPUT POINTS.
+C
+      DO 60 N2= 1,NPOINTS 
+C
+      VIPOINT = IVAL(N2)
+      VJPOINT = JVAL(N2)
+      VKPOINT = KVAL(N2)
+C
+C     FIRST SET FACI
+C  Non-dimensionalise the I values.
+      FINODE  = (VINODE -IMIN)/IRANGE
+      FIPOINT = (VIPOINT-IMIN)/IRANGE
+      ABSNODE = ABS(FINODE)
+C  Calculate the shape functions for I at every input node.
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FIPOINT.LT.FINODE)
+     &   FACI=(1.0 - ((FINODE-FIPOINT)/FINODE)**POWER)
+      IF(FIPOINT.GE.FINODE)
+     &   FACI=(1.0 - ((FIPOINT-FINODE)/(1.-FINODE))**POWER)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACI = (IMAX-VIPOINT)/IRANGE
+      IF(ABSNODE.GT.0.9999) FACI = (VIPOINT-IMIN)/IRANGE
+      ENDIF
+C
+C     NEXT SET FACJ
+C  Non-dimensionalise the J values. 
+      FJNODE  = (VJNODE -JMIN)/JRANGE
+      FJPOINT = (VJPOINT-JMIN)/JRANGE
+      ABSNODE = ABS(FJNODE)
+C  Calculate the shape functions for J at every input node.
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FJPOINT.LT.FJNODE)
+     &   FACJ=(1.0 - ((FJNODE-FJPOINT)/FJNODE)**POWER)
+      IF(FJPOINT.GE.FJNODE)
+     &   FACJ=(1.0 - ((FJPOINT-FJNODE)/(1.-FJNODE))**POWER)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACJ = (JMAX-VJPOINT)/JRANGE
+      IF(ABSNODE.GT.0.9999) FACJ = (VJPOINT-JMIN)/JRANGE
+      ENDIF
+C
+C    NEXT SET FACK
+C   Non-dimensionalise the K values.
+      FKNODE  = (VKNODE -KMIN)/KRANGE
+      FKPOINT = (VKPOINT-KMIN)/KRANGE
+      ABSNODE = ABS(FKNODE)
+C  Calculate the shape functions for K at every input node.
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FKPOINT.LT.FKNODE)
+     &   FACK=(1.0 - ((FKNODE-FKPOINT)/FKNODE)**POWER)
+      IF(FKPOINT.GE.FKNODE)
+     &   FACK=(1.0 - ((FKPOINT-FKNODE)/(1.-FKNODE))**POWER)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACK = (KMAX-VKPOINT)/KRANGE
+      IF(ABSNODE.GT.0.9999) FACK = (VKPOINT-KMIN)/KRANGE
+      ENDIF
+C
+C     Set the coefficients of the matrix  A(i,j)
+C
+      A(N2,N1) = FACI*FACJ*FACK
+C
+C
+   60 CONTINUE
+   50 CONTINUE 
+
+C
+      IF(IFCHECK.GE.2) THEN
+C
+      WRITE(6,*)  ' NPOINTS = ',NPOINTS
+      DO N1=1,NPOINTS
+      WRITE(6,*) ' EFFECT OF UNIT CHANGE AT POINT N1 =', N1
+      write(6,999) (A(N1,N2),N2=1,NPOINTS)
+      END DO
+  999 FORMAT(8F10.5)
+C
+      ENDIF
+C 
+C   perform lower upper decomposition of matrix 
+C  
+      WRITE(6,*) ' CALLING LUDCMP'
+      CALL LUDCMP(A,NPOINTS,NDIM,INDX,DD,NERR)
+C 
+C 
+C 
+C   Perform lower upper back substitution.
+C   The resulting XVAL,YVAL,ZVAL  are used to perform the interpolations.
+C  
+      WRITE(6,*) ' CALLING LUBKSB FOR X'
+      CALL LUBKSB(A,NPOINTS,NDIM,INDX,XVAL)
+C
+      WRITE(6,*) ' CALLING LUBKSB FOR Y'
+      CALL LUBKSB(A,NPOINTS,NDIM,INDX,YVAL)
+C
+      WRITE(6,*) ' CALLING LUBKSB FOR Z'
+      CALL LUBKSB(A,NPOINTS,NDIM,INDX,ZVAL) 
+      WRITE(6,*) ' CALLED  LUBKSB FOR Z'
+C
+      IF(IFCHECK.GE.2) THEN
+C
+      WRITE(6,*)
+      WRITE(6,*) ' X after LUBKSB'
+      WRITE(6,220) (XVAL(I),I=1,NPOINTS)
+      WRITE(6,*)
+      WRITE(6,*) ' Y after LUBKSB'
+      WRITE(6,220) (YVAL(I),I=1,NPOINTS)
+      WRITE(6,*)
+      WRITE(6,*) ' Z after LUBKSB'
+      WRITE(6,220) (ZVAL(I),I=1,NPOINTS)
+C
+      ENDIF
+C
+C*******************************************************************************
+C*******************************************************************************
+C
+C   Now set the non-dimensional I,J,K values of the required grid points where
+C   the values of  X, R, R-theta are to be found. 
+C
+
+      DO 210 I = 1,IM
+      FACI     =  FI(I,NBLCK)
+      VIPOINT  =  IMIN + FACI*IRANGE
+C
+      DO 200 J = 1,JM
+      FACJ     =  FJ(J,NBLCK)
+      VJPOINT  =  JMIN + FACJ*JRANGE
+C
+      DO 190 K = 1,KM
+      FACK     =  FK(K,NBLCK)      
+      VKPOINT  =  KMIN + FACK*KRANGE
+C
+      ANSX = 0.0
+      ANSY = 0.0
+      ANSZ = 0.0
+C
+C     Start the  loop to sum the series of shape functions so as to obtain
+C     the values of X ,R ,R-threta at the current I, J, K  grid point.
+C
+      DO 230 N=1,NPOINTS
+C
+C     Form the non-dimensional I value at the grid point.
+      VINODE = IVAL(N)
+      VJNODE = JVAL(N)
+      VKNODE = KVAL(N)
+C
+      FINODE  = (VINODE -IMIN)/IRANGE
+      FIPOINT = (VIPOINT-IMIN)/IRANGE
+      ABSNODE = ABS(FINODE)
+C     Form the shape function for I at the grid point.
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FIPOINT.LT.FINODE)
+     &   FACI=(1.0 - ((FINODE-FIPOINT)/FINODE)**POWER)
+      IF(FIPOINT.GE.FINODE)
+     &   FACI=(1.0 - ((FIPOINT-FINODE)/(1.-FINODE))**POWER)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACI = (IMAX-VIPOINT)/IRANGE
+      IF(ABSNODE.GT.0.9999) FACI = (VIPOINT-IMIN)/IRANGE
+      ENDIF
+C
+C     Form the non-dimensional J vale at the grid point.   
+      FJNODE  = (VJNODE -JMIN)/JRANGE
+      FJPOINT = (VJPOINT-JMIN)/JRANGE
+      ABSNODE = ABS(FJNODE)
+C     Form the shape function for J at the grid point.
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FJPOINT.LT.FJNODE)
+     &   FACJ=(1.0 - ((FJNODE-FJPOINT)/FJNODE)**POWER)
+      IF(FJPOINT.GE.FJNODE)
+     &   FACJ=(1.0 - ((FJPOINT-FJNODE)/(1.-FJNODE))**POWER)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACJ = (JMAX-VJPOINT)/JRANGE
+      IF(ABSNODE.GT.0.9999) FACJ = (VJPOINT-JMIN)/JRANGE
+      ENDIF
+C 
+C     Form the non-dimensional K vale at the grid point. 
+      FKNODE  = (VKNODE -KMIN)/KRANGE
+      FKPOINT = (VKPOINT-KMIN)/KRANGE
+      ABSNODE = ABS(FKNODE)
+C  Form the shape function for K at the grid point
+      IF(ABSNODE.GT.0.0001.AND.ABSNODE.LT.0.9999) THEN
+      IF(FKPOINT.LT.FKNODE)
+     &   FACK=(1.0 - ((FKNODE-FKPOINT)/FKNODE)**POWER)
+      IF(FKPOINT.GE.FKNODE)
+     &   FACK=(1.0 - ((FKPOINT-FKNODE)/(1.-FKNODE))**POWER)
+      ELSE
+      IF(ABSNODE.LT.0.0001) FACK = (KMAX-VKPOINT)/KRANGE
+      IF(ABSNODE.GT.0.9999) FACK = (VKPOINT-KMIN)/KRANGE
+      ENDIF
+C
+C      WRITE(6,*)
+C      WRITE(6,*) ' NODE NUMBER ', N
+C      WRITE(6,*) ' IPOINT,JPOINT ', VIPOINT,VJPOINT
+C      WRITE(6,*) ' FACI, FACJ, INFLUENCE COEFF', FACI,FACJ,FACI*FACJ
+C
+C     SUM THE CONTRIBUTIONS FROM EACH INPUT NODE TO FORM THE FINAL
+C     VALUES OF  X, R, R-THETA AT THE GRID POINT
+C
+      ANSX = ANSX + FACI*FACJ*FACK*XVAL(N)
+      ANSY = ANSY + FACI*FACJ*FACK*YVAL(N)
+      ANSZ = ANSZ + FACI*FACJ*FACK*ZVAL(N)
+C
+  230 CONTINUE
+C
+C
+C     STORE THE GRID COORDINATES IN the FINAL ARRAYS.
+C
+      X(I,J,K,NBLCK) = ANSX
+      R(I,J,K,NBLCK) = ANSY
+      RT(I,J,K,NBLCK)= ANSZ
+C
+C      WRITE(6,*)
+C      WRITE(6,*) ' INTERPOLATED COORDINATES ', ANSX,ANSY,ANSZ
+C      WRITE(6,*)
+C
+  190 CONTINUE
+  200 CONTINUE
+  210 CONTINUE
+  220 FORMAT(10F10.4)
+C 
+      RETURN
+      END 
+C
+C*******************************************************************************
+C
+      SUBROUTINE LUDCMP(A,N,NDIM,INDX,D,NERR)
+C
+      DIMENSION A(NDIM,NDIM),INDX(NDIM),VV(500)
+C
+      DOUBLE PRECISION A,TINY,VV
+C
+      DATA TINY / 1.0 D-20 /  
+C
+      D=1.0 
+      DO 12 I=1,N 
+      AAMAX = 0. 
+      DO 11 J=1,N 
+      IF(ABS(A(I,J)).GT.AAMAX) AAMAX=ABS(A(I,J)) 
+   11 CONTINUE 
+      IF(AAMAX.LT.TINY) NERR = NERR + 1  
+      VV(I)=1./AAMAX 
+   12 CONTINUE 
+      DO 19 J=1,N 
+      IF(J.GT.1) THEN 
+      DO 14 I=1,J-1 
+      SUM=A(I,J) 
+      IF(I.GT.1) THEN 
+      DO 13 K=1,I-1 
+      SUM=SUM - A(I,K)*A(K,J) 
+   13 CONTINUE 
+      A(I,J)=SUM 
+      ENDIF 
+   14 CONTINUE 
+      ENDIF 
+C
+      AAMAX=0.0 
+      DO 16 I=J,N 
+      SUM=A(I,J) 
+      IF(J.GT.1) THEN 
+      DO 15 K=1,J-1 
+      SUM=SUM-A(I,K)*A(K,J) 
+   15 CONTINUE 
+      A(I,J)=SUM 
+      ENDIF 
+      DUM=VV(I)*ABS(SUM) 
+      IF(DUM.GE.AAMAX) THEN 
+      IMAX=I 
+      AAMAX=DUM 
+      ENDIF 
+   16 CONTINUE 
+      IF(J.NE.IMAX) THEN 
+      DO 17 K=1,N 
+      DUM=A(IMAX,K) 
+      A(IMAX,K)=A(J,K) 
+      A(J,K)=DUM 
+   17 CONTINUE 
+      D=-D 
+      VV(IMAX)=VV(J) 
+      ENDIF 
+      INDX(J)=IMAX 
+      IF(J.NE.N) THEN 
+      IF(A(J,J).EQ.0.) A(J,J)= TINY 
+      DUM=1./A(J,J) 
+      DO 18 I=J+1,N 
+      A(I,J)=A(I,J)*DUM 
+   18 CONTINUE 
+      ENDIF 
+   19 CONTINUE 
+      IF(A(N,N).EQ.0.) A(N,N)=TINY 
+C
+      RETURN 
+      END 
+C
+C***********************************************************************
+C***********************************************************************
+C
+      SUBROUTINE LUBKSB(A,N,NDIM,INDX,B)
+C
+      DIMENSION A(NDIM,NDIM),INDX(NDIM),B(NDIM)
+C
+      DOUBLE PRECISION A, B
+C
+      II = 0 
+      DO 12 I=1,N 
+      LL  = INDX(I) 
+      SUM  = B(LL) 
+      B(LL)= B(I) 
+      IF(II.NE.0) THEN 
+      DO 11 J = II,I-1 
+      SUM = SUM - A(I,J)*B(J) 
+   11 CONTINUE 
+      ELSE IF (SUM.NE.0.) THEN 
+      II = I 
+      ENDIF 
+      B(I) = SUM 
+   12 CONTINUE 
+C
+      DO 14 I=N,1,-1 
+      SUM = B(I) 
+      IF(I.LT.N) THEN 
+      DO 13 J = I+1,N 
+      SUM = SUM-A(I,J)*B(J) 
+   13 CONTINUE 
+      ENDIF 
+      B(I) = SUM/A(I,I) 
+   14 CONTINUE 
+C
+      RETURN 
+      END 
+C
+C************************************************************************************
+C
+      SUBROUTINE GRIDSPACE(NBLCK,IM,NDIM,NBLK,FIRAT,FIMAX,FIEND,FGAP,
+     &                     SPACE)
+C
+C      FORM THE GRID SPACINGS IN ALL 3 COORDINATE DIRECTIONS.
+C      FI(I,NBLCK) IS THE FRACTION OF THE GAP AT GRID POINT 'I' .
+C      HENCE IT VARIES FROM 0.0 AT I = 1 to 1.0 at I = IM.
+C
+C
+      DIMENSION FGAP(NDIM,NBLK),SPACE(NDIM),SREV(NDIM)
+C
+C
+      IF(FIRAT.LT.0.00001) GO TO 100
+C
+      SPACE(1)    = 1.0
+      SREV(IM-1)  = FIEND
+      DO 10 I=2,IM-1
+      IREV = IM - I
+      SREV(IREV)  = SREV(IREV+1)*FIRAT
+   10 SPACE(I)    = SPACE(I-1)*FIRAT
+C
+C
+      DO  20 I=1,IM-1
+      IF(FIRAT.GE.1.0) THEN
+      IF(SPACE(I).GT.SREV(I)) SPACE(I) = SREV(I)
+      IF(SPACE(I).GT.FIMAX)   SPACE(I) = FIMAX
+      ELSE
+      IF(SPACE(I).LT.SREV(I)) SPACE(I) = SREV(I)
+      IF(SPACE(I).LT.FIMAX)   SPACE(I) = FIMAX
+      ENDIF
+   20 CONTINUE
+C
+C     RE ENTER HERE IF SPACE(I) WAS READ IN AS DATA.
+C
+  100 CONTINUE
+C
+      SUM = 0.0
+      DO  30 I=1,IM-1
+   30 SUM = SUM + SPACE(I)
+C
+      DO  40 I=1,IM-1
+      SPACE(I) = SPACE(I)/SUM
+   40 CONTINUE
+C
+C      WRITE(6,*) 'SPACE ', (SPACE(I),I=1,IM)
+C 
+      FGAP(1,NBLCK) = 0.0
+      DO 50 I=2,IM
+      FGAP(I,NBLCK) = FGAP(I-1,NBLCK) +  SPACE(I-1) 
+   50 CONTINUE
+C 
+C
+C      WRITE(6,*) ' FGAP ', (FGAP(I,NBLCK),I=1,IM)
+C
+      RETURN
+      END  
+      
+C******************************************************************************
+C******************************************************************************
+      SUBROUTINE SUMAS(NBLCK,FLOWIN,FLOWOUT,HOAVGIN,
+     &                 HOAVGOUT,POAVGIN,POAVGOUT)
+C
+      INCLUDE 'commall-29'
+C
+C
+      COMMON/BKSEC/
+     & RO(NIM,NJM,NKM),ROVX(NIM,NJM,NKM),ROVT(NIM,NJM,NKM),
+     & ROVR(NIM,NJM,NKM),ROE(NIM,NJM,NKM),HO(NIM,NJM,NKM),
+     & RORVT(NIM,NJM,NKM),VX(NIM,NJM,NKM),VT(NIM,NJM,NKM),
+     & VR(NIM,NJM,NKM),WT(NIM,NJM,NKM),ROWT(NIM,NJM,NKM),
+     & P(NIM,NJM,NKM),TSTATIC(NIM,NJM,NKM)
+C
+      NPTCH = NPATCH(NBLCK) 
+      IM    = NI(NBLCK)
+      JM    = NJ(NBLCK)
+      KM    = NK(NBLCK)
+C
+      DO 100 K=1,KM
+      DO 100 J=1,JM
+      DO 100 I=1,IM
+      TSTAG = HO(I,J,K)/CP
+      STORE2(I,J,K)  = P(I,J,K)*(TSTAG/TSTATIC(I,J,K))**RFGA
+  100 CONTINUE
+C
+C
+      DO 1000 NP=1,NPTCH
+C
+      IS     = IPATCHS(NP,NBLCK)
+      IE     = IPATCHE(NP,NBLCK)
+      JS     = JPATCHS(NP,NBLCK)
+      JE     = JPATCHE(NP,NBLCK)
+      KS     = KPATCHS(NP,NBLCK)
+      KE     = KPATCHE(NP,NBLCK)
+C
+C
+      IF(PATCHTYPE(NP,NBLCK).EQ.'I'.OR.PATCHTYPE(NP,NBLCK).EQ.'F') THEN
+C
+C     IF AN INLET BOUNDARY
+C
+      IF(IS.EQ.1.AND.IE.EQ.1) THEN
+      DO 10 K=KS,KE-1
+      DO 10 J=JS,JE-1
+      AVGHO = (HO(1,J,K)+HO(1,J+1,K)+HO(1,J+1,K+1)
+     &        +HO(1,J,K+1))
+      AVGPO = (STORE2(1,J,K)+STORE2(1,J+1,K)+STORE2(1,J+1,K+1)
+     &        +STORE2(1,J,K+1))
+      DFLOW   = FIMAS(1,J,K)
+      HOAVGIN = HOAVGIN + AVGHO*DFLOW
+      POAVGIN = POAVGIN + AVGPO*DFLOW
+   10 FLOWIN  = FLOWIN  + DFLOW
+      ENDIF 
+C
+      IF(IS.EQ.IM.AND.IE.EQ.IM) THEN
+      DO 20 K=KS,KE-1
+      DO 20 J=JS,JE-1
+      AVGHO = (HO(IM,J,K)+HO(IM,J+1,K)+HO(IM,J+1,K+1)
+     &        +HO(IM,J,K+1))
+      AVGPO = (STORE2(IM,J,K)+STORE2(IM,J+1,K)+STORE2(IM,J+1,K+1)
+     &        +STORE2(IM,J,K+1))
+      DFLOW   = -FIMAS(IM,J,K)
+      HOAVGIN = HOAVGIN + AVGHO*DFLOW
+      POAVGIN = POAVGIN + AVGPO*DFLOW
+   20 FLOWIN  = FLOWIN  + DFLOW
+      ENDIF
+C  
+      IF(JS.EQ.1.AND.JE.EQ.1) THEN
+      DO 30 K=KS,KE-1
+      DO 30 I=IS,IE-1
+      AVGHO = (HO(I,1,K)+HO(I+1,1,K)+HO(I+1,1,K+1)
+     &        +HO(I,1,K+1))
+      AVGPO = (STORE2(I,1,K)+STORE2(I+1,1,K)+STORE2(I+1,1,K+1)
+     &        +STORE2(I,1,K+1))
+      DFLOW   = FJMAS(I,1,K)
+      HOAVGIN = HOAVGIN + AVGHO*DFLOW
+      POAVGIN = POAVGIN + AVGPO*DFLOW
+   30 FLOWIN  = FLOWIN  + DFLOW
+      ENDIF 
+C
+      IF(JS.EQ.JM.AND.JE.EQ.JM) THEN
+      DO 40 K=KS,KE-1
+      DO 40 I=IS,IE-1
+      AVGHO = (HO(I,JM,K)+HO(I+1,JM,K)+HO(I+1,JM,K+1)
+     &        +HO(I,JM,K+1))
+      AVGPO = (STORE2(I,JM,K)+STORE2(I+1,JM,K)+STORE2(I+1,JM,K+1)
+     &        +STORE2(I,JM,K+1))
+      DFLOW   = -FJMAS(I,JM,K)
+      HOAVGIN = HOAVGIN + AVGHO*DFLOW
+      POAVGIN = POAVGIN + AVGPO*DFLOW
+   40 FLOWIN  = FLOWIN  + DFLOW
+      ENDIF 
+C  
+      IF(KS.EQ.1.AND.KE.EQ.1) THEN
+      DO 50 J=JS,JE-1
+      DO 50 I=IS,IE-1
+      AVGHO = (HO(I,J,1)+HO(I+1,J,1)+HO(I+1,J+1,1)
+     &        +HO(I,J+1,1))
+      AVGPO = (STORE2(I,J,1)+STORE2(I+1,J,1)+STORE2(I+1,J+1,1)
+     &        +STORE2(I,J+1,1))
+      DFLOW   = FKMAS(I,J,1)
+      HOAVGIN = HOAVGIN + AVGHO*DFLOW
+      POAVGIN = POAVGIN + AVGPO*DFLOW
+   50 FLOWIN  = FLOWIN  + DFLOW
+      ENDIF 
+C
+      IF(KS.EQ.KM.AND.KE.EQ.KM) THEN
+      DO 60 J=JS,JE-1
+      DO 60 I=IS,IE-1
+      AVGHO = (HO(I,J,KM)+HO(I+1,J,KM)+HO(I+1,J+1,KM)
+     &        +HO(I,J+1,KM))
+      AVGPO = (STORE2(I,J,KM)+STORE2(I+1,J,KM)+STORE2(I+1,J+1,KM)
+     &        +STORE2(I,J+1,KM))
+      DFLOW   = -FKMAS(I,J,KM)
+      HOAVGIN = HOAVGIN + AVGHO*DFLOW
+      POAVGIN = POAVGIN + AVGPO*DFLOW
+   60 FLOWIN  = FLOWIN  + DFLOW
+      ENDIF 
+C
+      ENDIF
+C        
+C
+      IF(PATCHTYPE(NP,NBLCK).EQ.'E') THEN
+C
+C     IF AN EXIT BOUNDARY
+C
+      IF(IS.EQ.1.AND.IE.EQ.1) THEN
+      DO 11 K=KS,KE-1
+      DO 11 J=JS,JE-1
+      AVGHO = (HO(1,J,K)+HO(1,J+1,K)+HO(1,J+1,K+1)
+     &        +HO(1,J,K+1))
+      AVGPO = (STORE2(1,J,K)+STORE2(1,J+1,K)+STORE2(1,J+1,K+1)
+     &        +STORE2(1,J,K+1))
+      DFLOW   = -FIMAS(1,J,K)
+      HOAVGOUT = HOAVGOUT + AVGHO*DFLOW
+      POAVGOUT = POAVGOUT + AVGPO*DFLOW
+   11 FLOWOUT = FLOWOUT + DFLOW
+      ENDIF 
+C
+      IF(IS.EQ.IM.AND.IE.EQ.IM) THEN
+      DO 21 K=KS,KE-1
+      DO 21 J=JS,JE-1
+      AVGHO = (HO(IM,J,K)+HO(IM,J+1,K)+HO(IM,J+1,K+1)
+     &        +HO(IM,J,K+1))
+      AVGPO = (STORE2(IM,J,K)+STORE2(IM,J+1,K)+STORE2(IM,J+1,K+1)
+     &        +STORE2(IM,J,K+1))
+      DFLOW   = FIMAS(IM,J,K)
+      HOAVGOUT = HOAVGOUT + AVGHO*DFLOW
+      POAVGOUT = POAVGOUT + AVGPO*DFLOW
+   21 FLOWOUT = FLOWOUT + DFLOW
+      ENDIF
+C  
+      IF(JS.EQ.1.AND.JE.EQ.1) THEN
+      DO 31 K=KS,KE-1
+      DO 31 I=IS,IE-1
+      AVGHO = (HO(I,1,K)+HO(I+1,1,K)+HO(I+1,1,K+1)
+     &        +HO(I,1,K+1))
+      AVGPO = (STORE2(I,1,K)+STORE2(I+1,1,K)+STORE2(I+1,1,K+1)
+     &        +STORE2(I,1,K+1))
+      DFLOW   = -FJMAS(I,1,K)
+      HOAVGOUT = HOAVGOUT + AVGHO*DFLOW
+      POAVGOUT = POAVGOUT + AVGPO*DFLOW
+   31 FLOWOUT = FLOWOUT + DFLOW
+      ENDIF 
+C
+      IF(JS.EQ.JM.AND.JE.EQ.JM) THEN
+      DO 41 K=KS,KE-1
+      DO 41 I=IS,IE-1
+      AVGHO = (HO(I,JM,K)+HO(I+1,JM,K)+HO(I+1,JM,K+1)
+     &        +HO(I,JM,K+1))
+      AVGPO = (STORE2(I,JM,K)+STORE2(I+1,JM,K)+STORE2(I+1,JM,K+1)
+     &        +STORE2(I,JM,K+1))
+      DFLOW   = FJMAS(I,JM,K)
+      HOAVGOUT = HOAVGOUT + AVGHO*DFLOW
+      POAVGOUT = POAVGOUT + AVGPO*DFLOW
+   41 FLOWOUT = FLOWOUT + DFLOW
+      ENDIF 
+C  
+      IF(KS.EQ.1.AND.KE.EQ.1) THEN
+      DO 51 J=JS,JE-1
+      DO 51 I=IS,IE-1
+      AVGHO = (HO(I,J,1)+HO(I+1,J,1)+HO(I+1,J+1,1)
+     &        +HO(I,J+1,1))
+      AVGPO = (STORE2(I,J,1)+STORE2(I+1,J,1)+STORE2(I+1,J+1,1)
+     &        +STORE2(I,J+1,1))
+      DFLOW   = -FKMAS(I,J,1)
+      HOAVGOUT = HOAVGOUT + AVGHO*DFLOW
+      POAVGOUT = POAVGOUT + AVGPO*DFLOW
+   51 FLOWOUT = FLOWOUT + DFLOW
+      ENDIF 
+C
+      IF(KS.EQ.KM.AND.KE.EQ.KM) THEN
+      DO 61 J=JS,JE-1
+      DO 61 I=IS,IE-1
+      AVGHO = (HO(I,J,KM)+HO(I+1,J,KM)+HO(I+1,J+1,KM)
+     &        +HO(I,J+1,KM))
+      AVGPO = (STORE2(I,J,KM)+STORE2(I+1,J,KM)+STORE2(I+1,J+1,KM)
+     &        +STORE2(I,J+1,KM))
+      DFLOW    = FKMAS(I,J,KM)
+      HOAVGOUT = HOAVGOUT + AVGHO*DFLOW
+      POAVGOUT = POAVGOUT + AVGPO*DFLOW
+   61 FLOWOUT  = FLOWOUT + DFLOW
+      ENDIF 
+C
+      ENDIF  
+C
+ 1000 CONTINUE
+C
+C
+      RETURN
+      END    
+C
+C*********************************************************************************     
+C
+
+      SUBROUTINE SORT(N,DISTSQ,NORDER)
+C
+C     THIS SORTING ROUTINE TAKEN FROM NUMERICAL RECIPES PAGE 231.
+C
+      DIMENSION DISTSQ(N),NORDER(N)
+C
+      L  = N/2 + 1
+      IR = N
+   10 CONTINUE
+      IF(L.GT.1) THEN
+           L = L-1
+           RRA = DISTSQ(L)
+           RRB = NORDER(L)
+      ELSE
+           RRA = DISTSQ(IR)
+           RRB = NORDER(IR)
+           DISTSQ(IR) = DISTSQ(1)
+           NORDER(IR) = NORDER(1)
+           IR = IR -1
+      IF(IR.EQ.1) THEN
+           DISTSQ(1) = RRA
+           NORDER(1) = RRB
+      RETURN
+      ENDIF
+      ENDIF
+      I = L
+      J = L + L
+   20 IF(J.LE.IR) THEN
+           IF(J.LT.IR) THEN
+                IF(DISTSQ(J).LT.DISTSQ(J+1)) J = J + 1
+           ENDIF
+      IF(RRA.LT.DISTSQ(J)) THEN
+           DISTSQ(I) = DISTSQ(J)
+           NORDER(I) = NORDER(J)
+           I = J
+           J = J + J
+      ELSE
+           J = IR+1
+      ENDIF
+      GO TO 20
+      ENDIF
+      DISTSQ(I) = RRA
+      NORDER(I) = RRB
+      GO TO 10
+      END
+C
+C*****************************************************************************
+C
+      SUBROUTINE SURF_INT(XINT,RINT,RTINT,ROINT,ROVXINT,
+     & ROVRINT,RORVTINT,ROEINT,XNOW,RNOW,RTNOW,ANSRO,ANSROVX,
+     & ANSROVR,ANSRORVT,ANSROE,NPINT)
+C
+      INCLUDE 'commall-29'
+C
+      DIMENSION 
+     & A(NINT_PTS,NINT_PTS),INDX(NINT_PTS),
+     & XINT(NINT_PTS),RINT(NINT_PTS),RTINT(NINT_PTS),
+     & ROINT(NINT_PTS),ROVXINT(NINT_PTS),ROVRINT(NINT_PTS),
+     & RORVTINT(NINT_PTS),ROEINT(NINT_PTS),RHS(NINT_PTS),
+     & DPRIM(NINT_PTS),DNORM(NINT_PTS)
+C
+      DOUBLE PRECISION  A,RHS,ROINT,ROVXINT,ROVRINT,RORVTINT,ROEINT
+C
+C
+C
+C     THIS METHOD FINDS A PRIMARY AND NORMAL DIRECTION IN THE SURFACE
+C     ON WHICH THE FLOW IS TO BE INTERPOLATED.
+C     IT THEN FITS A LEAST SQUARED PLANE THROUGH THE NEAREST "NPINTERP"
+C     POINTS ON THE SURFACE TO FIND THE VALUES AT THE REQUIRED POINT.
+C
+C
+C     FORM THE LENGTHS IN THE PRIMARY DIRECTION, FROM POINT 1 TO POINT NPINTERP
+C
+      DX1N   = XINT(NPINT) - XINT(1) 
+      DR1N   = RINT(NPINT) - RINT(1)
+      DT1N   = RTINT(NPINT)- RTINT(1)
+      DL1N   = SQRT(DX1N*DX1N + DR1N*DR1N + DT1N*DT1N)
+C
+C     FORM THE UNIT VECTOR ALONG THE PRIMARY DIRECTION
+C
+      UXP   = DX1N/DL1N
+      URP   = DR1N/DL1N
+      UTP   = DT1N/DL1N
+C
+C     FIND THE POINT WITH THE LARGEST NORMAL DISTANCE TO THE PRIMARY VECTOR.
+C
+      DMAX = 0.0
+      DO 10 N = 2,NPINT-1
+      DXN    = XINT(N) - XINT(1)
+      DRN    = RINT(N) - RINT(1)
+      DTN    = RTINT(N)- RTINT(1)
+      DLN    = DXN*UXP + DRN*URP + DTN*UTP
+      DXPN   = DXN - DLN*UXP
+      DRPN   = DRN - DLN*URP
+      DTPN   = DTN - DLN*UTP
+      DLPN   = SQRT(DXPN*DXPN + DRPN*DRPN + DTPN*DTPN)
+      IF(DLPN.GT.DMAX) THEN
+      NMAX   = N
+      DMAX   = DLPN
+      ENDIF      
+   10 CONTINUE
+C      
+C      FORM THE UNIT VECTOR IN THE NORMAL DIRECTION
+C
+      DXN    = XINT(NMAX) - XINT(1)
+      DRN    = RINT(NMAX) - RINT(1)
+      DTN    = RTINT(NMAX)- RTINT(1)  
+      DLN    = DXN*UXP + DRN*URP + DTN*UTP    
+      DXPN   = DXN - DLN*UXP
+      DRPN   = DRN - DLN*URP
+      DTPN   = DTN - DLN*UTP
+      DLPN   = SQRT(DXPN*DXPN + DRPN*DRPN + DTPN*DTPN) 
+      UXN    = DXPN/DLPN
+      URN    = DRPN/DLPN
+      UTN    = DTPN/DLPN     
+C
+C      FOR EACH POINT FIND THE PROJECTIONS IN THE PRIMARY AND NORMAL DIRECTIONS.
+C
+      DO 20 N=2,NPINT-1      
+      XD  = XINT(N)  - XINT(1)
+      RD  = RINT(N)  - RINT(1)
+      RTD = RTINT(N) - RTINT(1)
+      DPRIM(N) = XD*UXP + RD*URP + RTD*UTP
+      DNORM(N) = XD*UXN + RD*URN + RTD*UTN
+   20 CONTINUE
+      DPRIM(1)        = 0.0
+      DNORM(1)        = 0.0
+      DPRIM(NPINT)    = DL1N
+      DNORM(NPINT)    = 0.0
+C
+C      FORM THE COEFFICIENTS OF THE 3x3 MATRIX NEEDED FOR A LEAST SQUARED FIT
+C
+      SX   = 0.0
+      SY   = 0.0
+      SXSQ = 0.0
+      SYSQ = 0.0
+      SXY  = 0.0
+      DO 30 N = 1,NPINT
+      SX   = SX   + DPRIM(N)
+      SY   = SY   + DNORM(N)
+      SXSQ = SXSQ + DPRIM(N)*DPRIM(N)
+      SYSQ = SYSQ + DNORM(N)*DNORM(N)
+      SXY  = SXY  + DPRIM(N)*DNORM(N)
+   30 CONTINUE
+C
+      A(1,1)  = NPINT
+      A(1,2)  = SX
+      A(1,3)  = SY
+      A(2,1)  = SX
+      A(2,2)  = SXSQ
+      A(2,3)  = SXY
+      A(3,1)  = SY
+      A(3,2)  = SXY
+      A(3,3)  = SYSQ
+C
+C
+      XARG = (XNOW-XINT(1))*UXP+(RNOW-RINT(1))*URP
+     &      +(RTNOW-RTINT(1))*UTP
+      YARG = (XNOW-XINT(1))*UXN+(RNOW-RINT(1))*URN
+     &      +(RTNOW-RTINT(1))*UTN
+C
+      CALL LUDCMP(A,3,NINT_PTS,INDX,DD,NERR)
+C
+C     INTERPOLATE FOR DENSITY
+C
+      RHS(1) = 0.0
+      RHS(2) = 0.0
+      RHS(3) = 0.0
+      DO 40 N=1,NPINT
+      RHS(1) = RHS(1) + ROINT(N)
+      RHS(2) = RHS(2) + ROINT(N)*DPRIM(N)
+      RHS(3) = RHS(3) + ROINT(N)*DNORM(N)
+   40 CONTINUE
+      CALL LUBKSB(A,3,NINT_PTS,INDX,RHS)
+      ANSRO = RHS(1) + RHS(2)*XARG + RHS(3)*YARG
+C
+C     INTERPOLATE FOR ROVX
+C
+      RHS(1) = 0.0
+      RHS(2) = 0.0
+      RHS(3) = 0.0
+      DO 50 N=1,NPINT
+      RHS(1) = RHS(1) + ROVXINT(N)
+      RHS(2) = RHS(2) + ROVXINT(N)*DPRIM(N)
+      RHS(3) = RHS(3) + ROVXINT(N)*DNORM(N)
+   50 CONTINUE
+      CALL LUBKSB(A,3,NINT_PTS,INDX,RHS)
+      ANSROVX = RHS(1) + RHS(2)*XARG + RHS(3)*YARG
+C 
+C     INTERPOLATE FOR ROVR
+C
+      RHS(1) = 0.0
+      RHS(2) = 0.0
+      RHS(3) = 0.0
+      DO 60 N=1,NPINT
+      RHS(1) = RHS(1) + ROVRINT(N)
+      RHS(2) = RHS(2) + ROVRINT(N)*DPRIM(N)
+      RHS(3) = RHS(3) + ROVRINT(N)*DNORM(N)
+   60 CONTINUE
+      CALL LUBKSB(A,3,NINT_PTS,INDX,RHS)
+      ANSROVR = RHS(1) + RHS(2)*XARG + RHS(3)*YARG
+C 
+C     INTERPOLATE FOR RORVT
+C
+      RHS(1) = 0.0
+      RHS(2) = 0.0
+      RHS(3) = 0.0
+      DO 70 N=1,NPINT
+      RHS(1) = RHS(1) + RORVTINT(N)
+      RHS(2) = RHS(2) + RORVTINT(N)*DPRIM(N)
+      RHS(3) = RHS(3) + RORVTINT(N)*DNORM(N)
+   70 CONTINUE
+      CALL LUBKSB(A,3,NINT_PTS,INDX,RHS)
+      ANSRORVT = RHS(1) + RHS(2)*XARG + RHS(3)*YARG            
+C
+C 
+C     INTERPOLATE FOR ROE
+C
+      RHS(1) = 0.0
+      RHS(2) = 0.0
+      RHS(3) = 0.0
+      DO 80 N=1,NPINT
+      RHS(1) = RHS(1) + ROEINT(N)
+      RHS(2) = RHS(2) + ROEINT(N)*DPRIM(N)
+      RHS(3) = RHS(3) + ROEINT(N)*DNORM(N)
+   80 CONTINUE
+      CALL LUBKSB(A,3,NINT_PTS,INDX,RHS)
+      ANSROE  = RHS(1) + RHS(2)*XARG + RHS(3)*YARG
+C
+C
+      RETURN
+      END
+C
+C*******************************************************************************
+C
+      SUBROUTINE FLOWCHECK(NBLCK)
+C
+      INCLUDE 'commall-29'
+C
+      IM    = NI(NBLCK)
+      JM    = NJ(NBLCK)
+      KM    = NK(NBLCK)
+      IMM1  = IM-1
+      JMM1  = JM-1
+      KMM1  = KM-1
+C
+      FLOWI1 = 0.0
+      FLOWIM = 0.0
+      DO 10 K=1,KMM1
+      DO 10 J=1,JMM1
+      FLOWI1 = FLOWI1 + FIMAS(1,J,K)
+      FLOWIM = FLOWIM + FIMAS(IM,J,K)
+   10 CONTINUE
+C
+C
+      FLOWJ1 = 0.0
+      FLOWJM = 0.0
+      DO 20 K=1,KMM1
+      DO 20 I=1,IMM1
+      FLOWJ1 = FLOWJ1 + FJMAS(I,1,K)
+      FLOWJM = FLOWJM + FJMAS(I,JM,K)
+   20 CONTINUE
+C 
+      FLOWK1 = 0.0
+      FLOWKM = 0.0
+      DO 30 J=1,JMM1
+      DO 30 I=1,IMM1
+      FLOWK1 = FLOWK1 + FKMAS(I,J,1)
+      FLOWKM = FLOWKM + FKMAS(I,J,KM)
+   30 CONTINUE
+C 
+      FLOWMAX = AMAX1(ABS(FLOWI1),ABS(FLOWIM),ABS(FLOWJ1),ABS(FLOWJM),
+     &                ABS(FLOWK1),ABS(FLOWKM))
+C
+      SUMFLOW = FLOWI1-FLOWIM+FLOWJ1-FLOWJM+FLOWK1-FLOWKM
+C
+      ERRFLOW = 100.*SUMFLOW/FLOWMAX
+C
+      WRITE(6,*)
+      WRITE(6,*) ' BLOCK NUMBER ',NBLCK,' MASS FLOW BALANCE. ' 
+      WRITE(6,40) FLOWI1,FLOWIM
+      WRITE(6,50) FLOWJ1,FLOWJM
+      WRITE(6,60) FLOWK1,FLOWKM
+      WRITE(6,*) ' PERCENTAGE CONTINUITY ERROR = ', ERRFLOW
+      WRITE(6,*)
+   40 FORMAT(' FACE  I = 1 FLOW = ',F12.5,' FACE I = IM FLOW = ',F12.5)
+   50 FORMAT(' FACE  J = 1 FLOW = ',F12.5,' FACE J = JM FLOW = ',F12.5)
+   60 FORMAT(' FACE  K = 1 FLOW = ',F12.5,' FACE K = KM FLOW = ',F12.5)  
+C
+      RETURN
+      END        
+C
+C*****************************************************************************
+C
+      SUBROUTINE DTS_INIT(FN, FGRP, FNM1)
+C
+      INCLUDE 'commall-29'
+C
+      REAL FN(IMDT,JMDT,KMDT,NBLKDT),FGRP(IMDT,JMDT,KMDT,NBLKDT),
+     &     FNM1(IMDT,JMDT,KMDT,NBLKDT)
+C
+C INTIALISE DTS VARIABLES
+C
+      EIGHTH = 0.125
+      DO 10 NBLCK = 1,NBLOCKS
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+      DO 10 K=1,KM-1
+      DO 10 J=1,JM-1
+      DO 10 I=1,IM-1
+C
+      FAVE = EIGHTH*( FN(I,J,K,NBLCK)+FN(I+1,J,K,NBLCK)+
+     &                FN(I,J+1,K,NBLCK)+FN(I,J,K+1,NBLCK)+
+     &                FN(I+1,J+1,K,NBLCK)+FN(I+1,J,K+1,NBLCK)+
+     &                FN(I,J+1,K+1,NBLCK)+FN(I+1,J+1,K+1,NBLCK))
+      FGRP(I,J,K,NBLCK) = 1.5*FAVE
+      FNM1(I,J,K,NBLCK) = FAVE
+C
+ 10   CONTINUE
+C
+      RETURN
+      END
+C
+C*****************************************************************************
+C
+      SUBROUTINE DTS_UPDATE(FN, FGRP, FNM1)
+C
+      INCLUDE 'commall-29'
+C
+      REAL FN(IMDT,JMDT,KMDT,NBLKDT),FGRP(IMDT,JMDT,KMDT,NBLKDT),
+     &     FNM1(IMDT,JMDT,KMDT,NBLKDT)
+C
+      DIMENSION CCDELTA(IMDT,JMDT,KMDT)
+C
+C UPDATE DTS VARIABLES
+C
+      EIGHTH = 0.125
+      QUART  = 0.25
+      HALF   = 0.5
+C
+      DO 1000 NBLCK = 1,NBLOCKS
+      IM = NI(NBLCK)
+      JM = NJ(NBLCK)
+      KM = NK(NBLCK)
+      IMM1 = IM-1
+      JMM1 = JM-1
+      KMM1 = KM-1
+      SUMCHG = 0.
+      DO 10 K=1,KMM1
+      DO 10 J=1,JMM1
+      DO 10 I=1,IMM1
+C
+      FAVE = EIGHTH * (FN(I,J,K,NBLCK)    + FN(I+1,J,K,NBLCK)+
+     &                 FN(I,J+1,K,NBLCK)  + FN(I,J,K+1,NBLCK)+
+     &                 FN(I+1,J+1,K,NBLCK)+ FN(I+1,J,K+1,NBLCK)+
+     &                 FN(I,J+1,K+1,NBLCK)+ FN(I+1,J+1,K+1,NBLCK))
+C
+C Now update the DTS variables
+C
+      FNM1_OLD = FNM1(I,J,K,NBLCK)
+C
+      FGRP(I,J,K,NBLCK) = 2*FAVE - 0.5*FNM1_OLD
+C
+      FNM1(I,J,K,NBLCK) = FAVE
+C
+C Make a prediction for the new value of FN
+C We have 3 values of F on which to base the prediction
+C Calculate the change between the value of FN at the end of 
+C the last step (FNM1_NEW), and the predicted FN for the current
+C step, store as CCDELTA (cell-centred delta)
+C
+C Next line for a 2 pt linear extrapolation:
+
+       CCDELTA(I,J,K) = FAVE - FNM1_OLD
+
+C Next line for a 3 pt quadratic extrapolation:
+cc      CCDELTA(I,J,K) = 2*FNM1_NEW - 3*FNM2_NEW + FNM3_NEW
+C Next line for a 3 pt least squares, linear:
+cc      CCDELTA(I,J,K) = -2.*FNM1_NEW - 2*FNM2_NEW - 3*FNM3_NEW
+cc     &               + 7./3.*(FNM1_NEW+FNM2_NEW+FNM3_NEW)
+C Next line for no change
+C
+C      CCDELTA(I,J,K) = 0.
+C
+C       SUMCHG = SUMCHG + ABS(CCDELTA(I,J,K))
+C
+ 10   CONTINUE
+C
+C Apply negative feedback to changes if desired
+C
+C
+C*******************************************************************************
+C
+C      AVGCHG = 10*SUMCHG/(IMM1*JMM1*KMM1)
+C      DO 1525 K=1,KMM1
+C      DO 1525 J=1,JMM1
+C      DO 1525 I=1,IMM1
+C      DELTA           = CCDELTA(I,J,K)
+C      ABSCHG          = ABS(DELTA)
+C      CCDELTA(I,J,K)  = DELTA/(1. + ABSCHG/AVGCHG)
+C 1525 CONTINUE
+
+ 1530 CONTINUE
+C
+C     SKIP THE REMAINDER OF THIS SUBROUTINE.
+C
+      GO TO 1000
+C
+C
+C     ADD THE CHANGES CCDELTA(I,J,K) TO THE OLD VALUE OF THE VARIABLE
+C     FN(I,J,K) DISTRIBUTING THE CHANGES TO THE FOUR CORNERS
+C
+C     FIRST ADD THE CELL CHANGES TO ALL CORNERS OF INTERIOR CELLS AND THE
+C     I = 1 and I=IM FACES.
+C
+      DO 1100 K = 2,KMM1
+      DO 1100 J = 2,JMM1
+
+      SUMP = EIGHTH*(CCDELTA(1,J-1,K) + CCDELTA(1,J-1,K-1)
+     &             + CCDELTA(1,J,K)   + CCDELTA(1,J,K-1))
+      FN(1,J,K,NBLCK)  = FN(1,J,K,NBLCK) + 2.0*SUMP
+      DO 1101 I = 2,IMM1
+      SUM =  EIGHTH*(CCDELTA(I,J-1,K) + CCDELTA(I,J-1,K-1)
+     &             + CCDELTA(I,J,K)   + CCDELTA(I,J,K-1))
+      FN(I,J,K,NBLCK)  = FN(I,J,K,NBLCK)  +  SUM  + SUMP
+      SUMP = SUM
+ 1101 CONTINUE
+      FN(IM,J,K,NBLCK) = FN(IM,J,K,NBLCK) + 2.0*SUMP
+ 1100 CONTINUE
+C
+C
+C     NEXT ADD AN EXTRA CHANGES TO THE K = 1 and K = KM SURFACES
+C     INCLUDING THE I = 1 and IM surfaces BUT NOT THE J=1 and JM CORNERS.
+C
+C     FIRST K = 1
+C
+      DO 1120 J = 2,JMM1
+      SUMP        = QUART*(CCDELTA(1,J-1,1) + CCDELTA(1,J,1))
+      FN(1,J,1,NBLCK)  = FN(1,J,1,NBLCK) + 2.0*SUMP
+      DO 1121 I = 2,IMM1
+      SUM         = QUART*(CCDELTA(I,J-1,1) + CCDELTA(I,J,1))
+      FN(I,J,1,NBLCK)  = FN(I,J,1,NBLCK) + SUM + SUMP
+      SUMP        = SUM
+ 1121 CONTINUE
+      FN(IM,J,1,NBLCK) = FN(IM,J,1,NBLCK) + 2.0*SUMP
+ 1120 CONTINUE
+C
+C      NOW K = KM
+C
+      DO 1125 J  = 2,JMM1
+      SUMP         = QUART*(CCDELTA(1,J-1,KMM1) + CCDELTA(1,J,KMM1))
+      FN(1,J,KM,NBLCK)  = FN(1,J,KM,NBLCK) + 2.0*SUMP
+      DO 1126 I  = 2,IMM1
+      SUM          = QUART*(CCDELTA(I,J-1,KMM1) + CCDELTA(I,J,KMM1))
+      FN(I,J,KM,NBLCK)  = FN(I,J,KM,NBLCK) + SUM + SUMP
+      SUMP         = SUM
+ 1126 CONTINUE
+      FN(IM,J,KM,NBLCK) = FN(IM,J,KM,NBLCK) + 2.0*SUMP
+ 1125 CONTINUE
+C
+C     ADD THE CHANGES TO THE J = 1 and J = JM BOUNDARIES
+C     INCLUDING I = 1 and IM BUT NOT K=1 and K=KM.
+C
+C     FIRST J=1.
+C
+      DO 1130 K = 2,KMM1
+      SUMP        = QUART*(CCDELTA(1,1,K) + CCDELTA(1,1,K-1))
+      FN(1,1,K,NBLCK)  = FN(1,1,K,NBLCK) + 2.*SUMP
+      DO 1131 I = 2,IMM1
+      SUM         = QUART*(CCDELTA(I,1,K) + CCDELTA(I,1,K-1))
+      FN(I,1,K,NBLCK)  = FN(I,1,K,NBLCK) + SUM + SUMP
+      SUMP        = SUM
+ 1131 CONTINUE
+      FN(IM,1,K,NBLCK) = FN(IM,1,K,NBLCK) + 2.0*SUMP
+ 1130 CONTINUE
+C
+C     NOW J=JM.
+C
+      DO 1132 K = 2,KMM1
+      SUMP        = QUART*(CCDELTA(1,JMM1,K) + CCDELTA(1,JMM1,K-1))
+      FN(1,JM,K,NBLCK) = FN(1,JM,K,NBLCK) + 2.*SUMP
+      DO 1133 I = 2,IMM1
+      SUM         = QUART*(CCDELTA(I,JMM1,K) + CCDELTA(I,JMM1,K-1))
+      FN(I,JM,K,NBLCK) = FN(I,JM,K,NBLCK) + SUM + SUMP
+      SUMP        = SUM
+ 1133 CONTINUE
+      FN(IM,JM,K,NBLCK) = FN(IM,JM,K,NBLCK) + 2.0*SUMP
+ 1132 CONTINUE
+C
+C
+C     NOW UPDATE THE CORNER NODES: K=1,J=1.  K=KM,J=1. K=1,J=JM.  K=KM,J=JM.
+C
+C     FIRST THE K = 1,J = 1 CORNER.
+C
+      SUMP       = 0.5*CCDELTA(1,1,1)
+      FN(1,1,1,NBLCK) = FN(1,1,1,NBLCK) + 2.*SUMP
+      DO 1140 I  = 2,IMM1
+      SUM        = 0.5*CCDELTA(I,1,1)
+      FN(I,1,1,NBLCK) = FN(I,1,1,NBLCK) + SUM + SUMP
+      SUMP       =  SUM
+ 1140 CONTINUE
+      FN(IM,1,1,NBLCK) = FN(IM,1,1,NBLCK) + 2.*SUMP
+C
+C     NEXT THE K = 1,J = JM CORNER.
+C
+      SUMP        = 0.5*CCDELTA(1,JMM1,1)
+      FN(1,JM,1,NBLCK) = FN(1,JM,1,NBLCK) + 2.*SUMP
+      DO 1150   I = 2,IMM1
+      SUM         = 0.5*CCDELTA(I,JMM1,1)
+      FN(I,JM,1,NBLCK) = FN(I,JM,1,NBLCK) + SUM + SUMP
+      SUMP        =  SUM
+ 1150 CONTINUE
+      FN(IM,JM,1,NBLCK) = FN(IM,JM,1,NBLCK) + 2.*SUMP
+C
+C     NEXT THE K = KM,J = 1 CORNER.
+C
+      SUMP        = 0.5*CCDELTA(1,1,KMM1)
+      FN(1,1,KM,NBLCK) = FN(1,1,KM,NBLCK) + 2.*SUMP
+      DO 1160   I = 2,IMM1
+      SUM         = 0.5*CCDELTA(I,1,KMM1)
+      FN(I,1,KM,NBLCK) = FN(I,1,KM,NBLCK) + SUM + SUMP
+      SUMP        =  SUM
+ 1160 CONTINUE
+      FN(IM,1,KM,NBLCK) = FN(IM,1,KM,NBLCK) + 2.*SUMP
+C
+C     NEXT THE K = KM,J = JM CORNER.
+C
+      SUMP         = 0.5*CCDELTA(1,JMM1,KMM1)
+      FN(1,JM,KM,NBLCK) = FN(1,JM,KM,NBLCK) + 2.*SUMP
+      DO 1170 I    = 2,IMM1
+      SUM          = 0.5*CCDELTA(I,JMM1,KMM1)
+      FN(I,JM,KM,NBLCK) = FN(I,JM,KM,NBLCK) + SUM + SUMP
+      SUMP         =  SUM
+ 1170 CONTINUE
+      FN(IM,JM,KM,NBLCK) = FN(IM,JM,KM,NBLCK) + 2.*SUMP
+C
+C
+ 1000 CONTINUE
+C
+      RETURN
+      END
+C
+C*************************************************************************************
+C
+      SUBROUTINE INBCONDS(NPTCH,NBLCK)
+C
+	 INCLUDE 'commall-29'
+C
+      IS     = IPATCHS(NPTCH,NBLCK)
+      IE     = IPATCHE(NPTCH,NBLCK)
+      JS     = JPATCHS(NPTCH,NBLCK)
+      JE     = JPATCHE(NPTCH,NBLCK)
+      KS     = KPATCHS(NPTCH,NBLCK)
+      KE     = KPATCHE(NPTCH,NBLCK)
+C
+      RFIN   = RFINLET(NPTCH,NBLCK)
+      RFIN1  = 1.0 - RFIN
+C
+      P_DYNAMIC_IN = 0.0
+      DO 210 K = KS,KE
+      DO 210 J = JS,JE
+      DO 210 I = IS,IE 
+      PSTAG   = POIN(NPTCH,J,NBLCK)
+      TSTAG   = TOIN(NPTCH,J,NBLCK)
+      ROSTAG  = PSTAG/RGAS/TSTAG
+      ROIN    = ROALL(I,J,K,NBLCK) 
+      RADIN   = R(I,J,K,NBLCK) 
+      VBLADE  = WROTBLK(NBLCK)*RADIN   
+      IF(ROIN.GT.ROSTAG) ROIN = 0.99999*ROSTAG
+      TSTAT   = TSTAG*(ROIN/ROSTAG)**GA1
+      VABSQ   = 2.*CP*(TSTAG-TSTAT)
+      P_DYNAMIC_IN = P_DYNAMIC_IN + 0.5*VABSQ*ROIN
+C
+C     IF THE ABSOLUTE FLOW ANGLES ARE FIXED AT INLET
+C
+      IF(IFRELIN(NPTCH,NBLCK).EQ.0) THEN
+           VABS = SQRT(VABSQ)
+           VMER = VABS*COSBTMER(NPTCH,J,NBLCK)
+           VTIN = VABS*SINBTMER(NPTCH,J,NBLCK)
+      ENDIF
+C
+C     IF THE RELATIVE FLOW ANGLES ARE FIXED AT INLET
+C
+      IF(IFRELIN(NPTCH,NBLCK).EQ.1) THEN
+           TEMP    = VABSQ - VBLADE*VBLADE*COSBTMER(NPTCH,J,NBLCK)
+     &                                 *COSBTMER(NPTCH,J,NBLCK)
+           IF(TEMP.LT.0.01) TEMP = 0.01
+           VREL = SQRT(TEMP) - VBLADE*SINBTMER(NPTCH,J,NBLCK)
+           VMER = VREL*COSBTMER(NPTCH,J,NBLCK)
+           VTIN = VREL*SINBTMER(NPTCH,J,NBLCK) + VBLADE
+      ENDIF
+C
+C     IF THE ABSOLUTE TANGENTIAL VELOCITY IS FIXED AT INLET
+C
+      IF(IFRELIN(NPTCH,NBLCK).EQ.2) THEN
+           VTIN   = VTINLET(NPTCH,J,NBLCK)
+           VMERSQ = VABSQ - VTIN*VTIN
+           IF(VMERSQ.LT.0.01) VMERSQ = 0.01
+           VMER   = SQRT(VMERSQ)
+      ENDIF
+C
+      VXIN = VMER*COSBXMER(NPTCH,J,NBLCK)
+      VRIN = VMER*SINBXMER(NPTCH,J,NBLCK)      
+C
+      ROVXALL(I,J,K,NBLCK)  = RFIN1*ROVXALL(I,J,K,NBLCK)
+     &                      + RFIN*ROIN*VXIN
+      ROVRALL(I,J,K,NBLCK)  = RFIN1*ROVRALL(I,J,K,NBLCK)
+     &                      + RFIN*ROIN*VRIN
+      RORVTALL(I,J,K,NBLCK) = RFIN1*RORVTALL(I,J,K,NBLCK)
+     &                      + RFIN*ROIN*VTIN*RADIN
+      ROEALL(I,J,K,NBLCK)   = RFIN1*ROEALL(I,J,K,NBLCK)
+     &                      + RFIN*ROIN*(CV*TSTAT + 0.5*VABSQ)
+C
+  210 CONTINUE
+C
+      P_DYNAMIC_IN = P_DYNAMIC_IN/(IE+1-IS)/(JE+1-JS)/(KE+1-KS)
+C
+C     END OF THE APPLICATION OF INLET BOUNDARY CONDITIONS.
+C
+      RETURN
+      END
+C************************************************************************************  
+C*************************************************************************************
+C
+      SUBROUTINE FIXEDBCONDS(NPTCH,NBLCK)
+C
+	    INCLUDE 'commall-29'
+C
+      IS      =  IPATCHS(NPTCH,NBLCK)
+      IE      =  IPATCHE(NPTCH,NBLCK) 
+      JS      =  JPATCHS(NPTCH,NBLCK)
+      JE      =  JPATCHE(NPTCH,NBLCK)
+      KS      =  KPATCHS(NPTCH,NBLCK)
+      KE      =  KPATCHE(NPTCH,NBLCK)
+C
+      VXFXD    = VXFIXED(NPTCH,NBLCK)
+      VRFXD    = VRFIXED(NPTCH,NBLCK)
+      VTFXD    = VTFIXED(NPTCH,NBLCK)
+      VABSQ    = VXFXD*VXFXD + VRFXD*VRFXD +VTFXD*VTFXD
+      TSTAT    = TOFIXED(NPTCH,NBLCK) - 0.5*VABSQ/CP
+      PSTAT    = POFIXED(NPTCH,NBLCK)*(TSTAT/TOFIXED(NPTCH,NBLCK))**RFGA
+      ROFXD    = PSTAT/RGAS/TSTAT
+      ROVXFXD  = ROFXD*VXFXD
+      ROVRFXD  = ROFXD*VRFXD
+      ROVTFXD  = ROFXD*VTFXD
+      ROEFXD   = ROFXD*(CV*TSTAT + 0.5*VABSQ)
+      P_DYNAMIC_IN = 0.5*ROFXD*VABSQ
+C 
+C     WRITE(6,*) VXFXD,VRFXD,VTFXD,PSTAT,ROFXD,TSTAT 
+C      WRITE(6,*) ROVXFXD,ROVRFXD,ROVTFXD,PSTAT,ROEFXD     
+C
+      DO 10 K=KS,KE
+      DO 10 J=JS,JE
+      DO 10 I=IS,IE
+      ROALL(I,J,K,NBLCK)    = ROFXD
+      ROVXALL(I,J,K,NBLCK)  = ROVXFXD
+      ROVRALL(I,J,K,NBLCK)  = ROVRFXD
+      RORVTALL(I,J,K,NBLCK) = ROVTFXD*R(I,J,K,NBLCK)
+      ROEALL(I,J,K,NBLCK)   = ROEFXD
+   10 CONTINUE
+C
+      RETURN
+      END
+C
+C************************************************************************************  
+C*************************************************************************************
+C
+      SUBROUTINE PERBCONDS(NPTCH,NBLCK)
+C
+	    INCLUDE 'commall-29'
+C
+      CHARACTER*2 NXI,NXJ,NXK
+      
+C
+C
+      NXBLCK  =  NEXT_BLOCK(NPTCH,NBLCK)
+      NXPTCH  =  NEXT_PATCH(NPTCH,NBLCK)
+      NXI     =  NEXT_I(NPTCH,NBLCK)
+      NXJ     =  NEXT_J(NPTCH,NBLCK)
+      NXK     =  NEXT_K(NPTCH,NBLCK)
+C
+      IS      =  IPATCHS(NPTCH,NBLCK)
+      IE      =  IPATCHE(NPTCH,NBLCK) 
+      JS      =  JPATCHS(NPTCH,NBLCK)
+      JE      =  JPATCHE(NPTCH,NBLCK)
+      KS      =  KPATCHS(NPTCH,NBLCK)
+      KE      =  KPATCHE(NPTCH,NBLCK)
+C
+      NXIS    =  IPATCHS(NXPTCH,NXBLCK)
+      NXIE    =  IPATCHE(NXPTCH,NXBLCK) 
+      NXJS    =  JPATCHS(NXPTCH,NXBLCK)
+      NXJE    =  JPATCHE(NXPTCH,NXBLCK)
+      NXKS    =  KPATCHS(NXPTCH,NXBLCK)
+      NXKE    =  KPATCHE(NXPTCH,NXBLCK)
+C
+C     ENFORCE PERIODICITY BETWEEN PATCHES.
+C
+      DO 300 K=KS,KE
+      DO 300 J=JS,JE
+      DO 300 I=IS,IE
+C
+      IDIF = I - IS
+      JDIF = J - JS
+      KDIF = K - KS
+C  
+      IX = NXIS
+      JX = NXJS
+      KX = NXKS
+      IF(NXI.EQ.'+I'.OR.NXI.EQ.'+i') IX  = NXIS + IDIF
+      IF(NXI.EQ.'-I'.OR.NXI.EQ.'-i') IX  = NXIE - IDIF
+      IF(NXI.EQ.'+J'.OR.NXI.EQ.'+j') JX  = NXJS + IDIF
+      IF(NXI.EQ.'-J'.OR.NXI.EQ.'-j') JX  = NXJE - IDIF
+      IF(NXI.EQ.'+K'.OR.NXI.EQ.'+k') KX  = NXKS + IDIF
+      IF(NXI.EQ.'-K'.OR.NXI.EQ.'-k') KX  = NXKE - IDIF
+C
+      IF(NXJ.EQ.'+J'.OR.NXJ.EQ.'+j') JX  = NXJS + JDIF
+      IF(NXJ.EQ.'-J'.OR.NXJ.EQ.'-j') JX  = NXJE - JDIF
+      IF(NXJ.EQ.'+I'.OR.NXJ.EQ.'+i') IX  = NXIS + JDIF
+      IF(NXJ.EQ.'-I'.OR.NXJ.EQ.'-i') IX  = NXIE - JDIF
+      IF(NXJ.EQ.'+K'.OR.NXJ.EQ.'+k') KX  = NXKS + JDIF
+      IF(NXJ.EQ.'-K'.OR.NXJ.EQ.'-k') KX  = NXKE - JDIF
+C
+      IF(NXK.EQ.'+K'.OR.NXK.EQ.'+k') KX  = NXKS + KDIF
+      IF(NXK.EQ.'-K'.OR.NXK.EQ.'-k') KX  = NXKE - KDIF
+      IF(NXK.EQ.'+I'.OR.NXK.EQ.'+i') IX  = NXIS + KDIF
+      IF(NXK.EQ.'-I'.OR.NXK.EQ.'-i') IX  = NXIE - KDIF
+      IF(NXK.EQ.'+J'.OR.NXK.EQ.'+j') JX  = NXJS + KDIF
+      IF(NXK.EQ.'-J'.OR.NXK.EQ.'-j') JX  = NXJE - KDIF
+
+C
+      IF(IX.LT.0) WRITE(6,*) ' IX NEGATIVE, BLOCK, PATCH', NBLCK,NPTCH
+      IF(JX.LT.0) WRITE(6,*) ' JX NEGATIVE, BLOCK, PATCH', NBLCK,NPTCH
+      IF(KX.LT.0) WRITE(6,*) ' KX NEGATIVE, BLOCK, PATCH', NBLCK,NPTCH
+C
+C     ENFORCE PERIODICITY BETWEEN THE PATCHES
+C
+      ROALL(I,J,K,NBLCK)      = 0.5*(ROALL(I,J,K,NBLCK) +
+     &                               ROALL(IX,JX,KX,NXBLCK))
+      ROALL(IX,JX,KX,NXBLCK)  = ROALL(I,J,K,NBLCK)
+      ROVXALL(I,J,K,NBLCK)    = 0.5*(ROVXALL(I,J,K,NBLCK) +
+     &                               ROVXALL(IX,JX,KX,NXBLCK))
+      ROVXALL(IX,JX,KX,NXBLCK) = ROVXALL(I,J,K,NBLCK)
+      ROVRALL(I,J,K,NBLCK)     = 0.5*(ROVRALL(I,J,K,NBLCK) +
+     &                                ROVRALL(IX,JX,KX,NXBLCK))
+      ROVRALL(IX,JX,KX,NXBLCK) = ROVRALL(I,J,K,NBLCK)
+      RORVTALL(I,J,K,NBLCK)    = 0.5*(RORVTALL(I,J,K,NBLCK) +
+     &                                RORVTALL(IX,JX,KX,NXBLCK))
+      RORVTALL(IX,JX,KX,NXBLCK)= RORVTALL(I,J,K,NBLCK)
+      ROEALL(I,J,K,NBLCK)      = 0.5*(ROEALL(I,J,K,NBLCK) +
+     &                                ROEALL(IX,JX,KX,NXBLCK))
+      ROEALL(IX,JX,KX,NXBLCK)  = ROEALL(I,J,K,NBLCK)
+  300 CONTINUE
+C
+      IFDONE(NXPTCH,NXBLCK) = 1
+C
+C     END OF PERIODIC BOUNDARY CONDITION APPLICATION.
+C
+      RETURN
+      END
+C
+C*************************************************************************************
+C*************************************************************************************
+C
+      SUBROUTINE MIXPLANE(NPTCH,NBLCK)
+C
+      INCLUDE 'commall-29'
+C
+      CHARACTER*2 NXI,NXJ,NXK
+C
+      NXBLCK  =  NEXT_BLOCK(NPTCH,NBLCK)
+      NXPTCH  =  NEXT_PATCH(NPTCH,NBLCK)
+      NXI     =  NEXT_I(NPTCH,NBLCK)
+      NXJ     =  NEXT_J(NPTCH,NBLCK)
+      NXK     =  NEXT_K(NPTCH,NBLCK)
+C
+      IS      =  IPATCHS(NPTCH,NBLCK)
+      IE      =  IPATCHE(NPTCH,NBLCK) 
+      JS      =  JPATCHS(NPTCH,NBLCK)
+      JE      =  JPATCHE(NPTCH,NBLCK)
+      KS      =  KPATCHS(NPTCH,NBLCK)
+      KE      =  KPATCHE(NPTCH,NBLCK)
+C
+      NXIS    =  IPATCHS(NXPTCH,NXBLCK)
+      NXIE    =  IPATCHE(NXPTCH,NXBLCK) 
+      NXJS    =  JPATCHS(NXPTCH,NXBLCK)
+      NXJE    =  JPATCHE(NXPTCH,NXBLCK)
+      NXKS    =  KPATCHS(NXPTCH,NXBLCK)
+      NXKE    =  KPATCHE(NXPTCH,NXBLCK)
+C
+C
+      FAVGUP = 1.0/(ABS(KE-KS)     + 1)
+      FAVGDN = 1.0/(ABS(NXKE-NXKS) + 1)
+C
+      DO 400   J = JS,JE
+C
+      SUMROUP    = 0.0
+      SUMROVXUP  = 0.0
+      SUMROVRUP  = 0.0
+      SUMRORVTUP = 0.0
+      SUMROEUP   = 0.0
+      DO 360 K=KS,KE
+      SUMROUP   = SUMROUP    +  ROALL(IS,J,K,NBLCK) 
+      SUMROVXUP = SUMROVXUP  +  ROVXALL(IS,J,K,NBLCK)    
+      SUMROVRUP = SUMROVRUP  +  ROVRALL(IS,J,K,NBLCK)
+      SUMRORVTUP= SUMRORVTUP +  RORVTALL(IS,J,K,NBLCK)
+      SUMROEUP  = SUMROEUP   +  ROEALL(IS,J,K,NBLCK)
+  360 CONTINUE
+C
+      ROAVG    = FAVGUP*SUMROUP    
+      ROVXAVG  = FAVGUP*SUMROVXUP  
+      ROVRAVG  = FAVGUP*SUMROVRUP  
+      RORVTAVG = FAVGUP*SUMRORVTUP
+      ROEAVG   = FAVGUP*SUMROEUP 
+C
+      SUMRODN    = 0.0
+      SUMROVXDN  = 0.0
+      SUMROVRDN  = 0.0
+      SUMRORVTDN = 0.0
+      SUMROEDN   = 0.0
+      DO 370 K  = NXKS,NXKE
+      SUMRODN   = SUMRODN    +  ROALL(NXIS,J,K,NXBLCK) 
+      SUMROVXDN = SUMROVXDN  +  ROVXALL(NXIS,J,K,NXBLCK)    
+      SUMROVRDN = SUMROVRDN  +  ROVRALL(NXIS,J,K,NXBLCK)
+      SUMRORVTDN= SUMRORVTDN +  RORVTALL(NXIS,J,K,NXBLCK)
+      SUMROEDN  = SUMROEDN   +  ROEALL(NXIS,J,K,NXBLCK)
+  370 CONTINUE
+C
+      ROAVG    = 0.5*(ROAVG    + FAVGDN*SUMRODN)
+      ROVXAVG  = 0.5*(ROVXAVG  + FAVGDN*SUMROVXDN)  
+      ROVRAVG  = 0.5*(ROVRAVG  + FAVGDN*SUMROVRDN)  
+      RORVTAVG = 0.5*(RORVTAVG + FAVGDN*SUMRORVTDN)
+      ROEAVG   = 0.5*(ROEAVG   + FAVGDN*SUMROEDN) 
+C
+C    NOW SET THE VALUES ON THE MIXING PLANE TO THE LOCAL AVERAGE 
+C
+      DO 380 K = KS,KE
+      ROALL(IS,J,K,NBLCK)      = ROAVG    
+      ROVXALL(IS,J,K,NBLCK)    = ROVXAVG  
+      ROVRALL(IS,J,K,NBLCK)    = ROVRAVG   
+      RORVTALL(IS,J,K,NBLCK)   = RORVTAVG  
+      ROEALL(IS,J,K,NBLCK)     = ROEAVG
+  380 CONTINUE
+C
+      DO 390 K = NXKS,NXKE
+      ROALL(NXIS,J,K,NXBLCK)   = ROAVG    
+      ROVXALL(NXIS,J,K,NXBLCK) = ROVXAVG    
+      ROVRALL(NXIS,J,K,NXBLCK) = ROVRAVG   
+      RORVTALL(NXIS,J,K,NXBLCK)= RORVTAVG
+      ROEALL(NXIS,J,K,NXBLCK)  = ROEAVG   
+  390 CONTINUE
+C
+  400 CONTINUE
+C
+C      END OF MIXING PLANE TREATMENT
+C
+      IFDONE(NXPTCH,NXBLCK) = 1
+C
+      RETURN  
+      END
+C
+C
+C*****************************************************************************
+C*****************************************************************************
+C
+      SUBROUTINE INTERP_FACE
+C
+      INCLUDE 'commall-29'
+C
+      DIMENSION 
+     & A(NMATRIX,NMATRIX),INDX(NMATRIX),
+     & XINT(NINT_PTS),RINT(NINT_PTS),RTINT(NINT_PTS),
+     & ROINT(NINT_PTS),ROVXINT(NINT_PTS),ROVRINT(NINT_PTS),
+     & RORVTINT(NINT_PTS),ROEINT(NINT_PTS),
+     & ANSRO(N_INTFACE,NPFACE),ANSROVX(N_INTFACE,NPFACE),
+     & ANSROVR(N_INTFACE,NPFACE),ANSRORVT(N_INTFACE,NPFACE),
+     & ANSROE(N_INTFACE,NPFACE)
+C
+      DOUBLE PRECISION A,ROINT,ROVXINT,ROVRINT,RORVTINT,ROEINT
+C
+C      NOW TREAT ANY NON-CONTIGUOUS BOUNDARIES. PTYPE = 'N'.
+C
+      DO 500 NFACE = 1,NINTFACE
+C
+      NERR = 0
+C
+      NBLCK  = NBLKINT(NFACE)
+      NPTCH  = NPCHINT(NFACE) 
+      NXBLCK = NEXT_BLOCK(NPTCH,NBLCK)
+      IS     = IPATCHS(NPTCH,NBLCK)
+      IE     = IPATCHE(NPTCH,NBLCK) 
+      JS     = JPATCHS(NPTCH,NBLCK)
+      JE     = JPATCHE(NPTCH,NBLCK)
+      KS     = KPATCHS(NPTCH,NBLCK)
+      KE     = KPATCHE(NPTCH,NBLCK)
+      NPINT  = NPINTERP(NPTCH,NBLCK)
+C
+      NPOINT = 0 
+      DO 600 K=KS,KE 
+      DO 600 J=JS,JE 
+      DO 600 I=IS,IE 
+      XNOW   = X(I,J,K,NBLCK)
+      RNOW   = R(I,J,K,NBLCK)
+      RTNOW  = RT(I,J,K,NBLCK)
+      NPOINT = NPOINT + 1
+C
+      DO 610 N = 1,NPINT
+      IX           = NEXTI(NFACE,NPOINT,N)
+      JX           = NEXTJ(NFACE,NPOINT,N)
+      KX           = NEXTK(NFACE,NPOINT,N)
+      XINT(N)      = X(IX,JX,KX,NXBLCK)
+      RINT(N)      = R(IX,JX,KX,NXBLCK)
+      RTINT(N)     = RT(IX,JX,KX,NXBLCK)
+      ROINT(N)     = ROALL(IX,JX,KX,NXBLCK)
+      ROVXINT(N)   = ROVXALL(IX,JX,KX,NXBLCK)
+      ROVRINT(N)   = ROVRALL(IX,JX,KX,NXBLCK)
+      RORVTINT(N)  = RORVTALL(IX,JX,KX,NXBLCK)
+      ROEINT(N)    = ROEALL(IX,JX,KX,NXBLCK)
+  610 CONTINUE
+C
+C
+      IF(INT_TYPE(NPTCH,NBLCK).EQ.0)  THEN
+C
+C     IF INT_TYPE = 0. INTERPOLATE BY SIMPLY AVERAGING THE NEAREST NPINTERP POINTS
+C
+      SUM1 = 0.0
+      SUM2 = 0.0
+      SUM3 = 0.0
+      SUM4 = 0.0
+      SUM5 = 0.0
+      DO 660 N =1,NPINT
+      SUM1 = SUM1 + ROINT(N)
+      SUM2 = SUM2 + ROVXINT(N)
+      SUM3 = SUM3 + ROVRINT(N)
+      SUM4 = SUM4 + RORVTINT(N)
+      SUM5 = SUM5 + ROEINT(N)
+  660 CONTINUE 
+C
+      AVGRO    = SUM1/NPINT
+      AVGROVX  = SUM2/NPINT
+      AVGROVR  = SUM3/NPINT
+      AVGRORVT = SUM4/NPINT
+      AVGROE   = SUM5/NPINT
+C
+      ANSRO(NFACE,NPOINT)    = AVGRO     
+      ANSROVX(NFACE,NPOINT)  = AVGROVX    
+      ANSROVR(NFACE,NPOINT)  = AVGROVR 
+      ANSRORVT(NFACE,NPOINT) = AVGRORVT 
+      ANSROE(NFACE,NPOINT)   = AVGROE 
+C
+      ENDIF
+C
+C
+C       
+      IF(INT_TYPE(NPTCH,NBLCK).EQ.1) THEN
+C
+C
+      CALL    SURF_INT(XINT,RINT,RTINT,ROINT,ROVXINT,
+     & ROVRINT,RORVTINT,ROEINT,XNOW,RNOW,RTNOW,ROANS,ROVXANS,
+     & ROVRANS,RORVTANS,ROEANS,NPINT)
+C
+      ANSRO(NFACE,NPOINT)   = ROANS
+      ANSROVX(NFACE,NPOINT) = ROVXANS
+      ANSROVR(NFACE,NPOINT) = ROVRANS
+      ANSRORVT(NFACE,NPOINT)= RORVTANS
+      ANSROE(NFACE,NPOINT)  = ROEANS
+C
+C
+      ENDIF
+C
+C
+C
+      IF(INT_TYPE(NPTCH,NBLCK).EQ.2) THEN
+C
+C
+C     SUBTRACT THE VALUES AT THE FIRST POINT BEFORE INTERPOLATING WITH
+C     INT_TYPE = 2. THIS REDUCES INTERPOLATION ERRORS.
+C
+      ROREF       = ROINT(1)
+      ROVXREF     = ROVXINT(1)
+      ROVRREF     = ROVRINT(1)
+      RORVTREF    = RORVTINT(1)
+      ROEREF      = ROEINT(1)
+      DO 670 N = 1, NPINT
+      ROINT(N)    = ROINT(N)    - ROREF
+      ROVXINT(N)  = ROVXINT(N)  - ROVXREF
+      ROVRINT(N)  = ROVRINT(N)  - ROVRREF
+      RORVTINT(N) = RORVTINT(N) - RORVTREF
+      ROEINT(N)   = ROEINT(N)   - ROEREF
+  670 CONTINUE
+C  
+C
+C     THREE DIMENSIONAL INTERPOLATION USING MULTI-QUADRATICS OVER AS MANY POINTS
+C     AS DESIRED. THIS IS SLOWER BUT MORE STABLE AND ACCURATE. TYPICALLY USE 10 POINTS.
+C
+      XRANGE = XINT(NPINT)  - XINT(1)
+      RRANGE = RINT(NPINT)  - RINT(1)
+      TRANGE = RTINT(NPINT) - RTINT(1)
+      RSQ    = 0.00001*(XRANGE*XRANGE + RRANGE*RRANGE + TRANGE*TRANGE)
+      DO 800 N1 = 1,NPINT
+      DO 800 N2 = 1,NPINT
+      XDIF      = XINT(N1)  - XINT(N2)
+      RDIF      = RINT(N1)  - RINT(N2)
+      RTDIF     = RTINT(N1) - RTINT(N2)
+      DISTSQ    = XDIF*XDIF + RDIF*RDIF + RTDIF*RTDIF
+      A(N2,N1)  = SQRT(DISTSQ + RSQ)
+  800 CONTINUE
+C
+      CALL LUDCMP(A,NPINT,NMATRIX,INDX,DD,NERR)
+C   
+      CALL LUBKSB(A,NPINT,NMATRIX,INDX,ROINT)
+      CALL LUBKSB(A,NPINT,NMATRIX,INDX,ROVXINT)      
+      CALL LUBKSB(A,NPINT,NMATRIX,INDX,ROVRINT)
+      CALL LUBKSB(A,NPINT,NMATRIX,INDX,RORVTINT)
+      CALL LUBKSB(A,NPINT,NMATRIX,INDX,ROEINT)
+C
+      SUM1 = 0.0
+      SUM2 = 0.0
+      SUM3 = 0.0
+      SUM4 = 0.0
+      SUM5 = 0.0
+      DO 850 N =1,NPINT
+      XDIF  = XNOW  - XINT(N)
+      RDIF  = RNOW  - RINT(N)
+      RTDIF = RTNOW - RTINT(N)
+      DISTSQ = SQRT(XDIF*XDIF + RDIF*RDIF + RTDIF*RTDIF + RSQ)
+      SUM1 = SUM1 + ROINT(N)*DISTSQ
+      SUM2 = SUM2 + ROVXINT(N)*DISTSQ
+      SUM3 = SUM3 + ROVRINT(N)*DISTSQ
+      SUM4 = SUM4 + RORVTINT(N)*DISTSQ
+      SUM5 = SUM5 + ROEINT(N)*DISTSQ
+  850 CONTINUE
+C
+      ANSRO(NFACE,NPOINT)   = SUM1  + ROREF
+      ANSROVX(NFACE,NPOINT) = SUM2  + ROVXREF
+      ANSROVR(NFACE,NPOINT) = SUM3  + ROVRREF
+      ANSRORVT(NFACE,NPOINT)= SUM4  + RORVTREF
+      ANSROE(NFACE,NPOINT)  = SUM5  + ROEREF
+C
+      ENDIF
+C
+C
+  600 CONTINUE
+C 
+C
+C
+  500 CONTINUE
+C
+C
+C  NOW COMBINE THE VALUES FROM THE NODES ON THE FACE AND THE INTERPLOATED VALUES
+C  FROM THE ADJACENT FACE.
+C
+      DO 700 NFACE = 1,NINTFACE
+C
+      NBLCK  = NBLKINT(NFACE)
+      NPTCH  = NPCHINT(NFACE)  
+      IS     = IPATCHS(NPTCH,NBLCK)
+      IE     = IPATCHE(NPTCH,NBLCK) 
+      JS     = JPATCHS(NPTCH,NBLCK)
+      JE     = JPATCHE(NPTCH,NBLCK)
+      KS     = KPATCHS(NPTCH,NBLCK)
+      KE     = KPATCHE(NPTCH,NBLCK)
+C
+      NPOINT = 0 
+      DO 750 K=KS,KE 
+      DO 750 J=JS,JE 
+      DO 750 I=IS,IE 
+      NPOINT = NPOINT + 1
+      ROALL(I,J,K,NBLCK)   = 0.5*(ROALL(I,J,K,NBLCK)
+     &                     +      ANSRO(NFACE,NPOINT))
+      ROVXALL(I,J,K,NBLCK) = 0.5*(ROVXALL(I,J,K,NBLCK)
+     &                     +      ANSROVX(NFACE,NPOINT))
+      ROVRALL(I,J,K,NBLCK) = 0.5*(ROVRALL(I,J,K,NBLCK)
+     &                     +      ANSROVR(NFACE,NPOINT))
+      RORVTALL(I,J,K,NBLCK) = 0.5*(RORVTALL(I,J,K,NBLCK)
+     &                      +      ANSRORVT(NFACE,NPOINT))
+      ROEALL(I,J,K,NBLCK)  = 0.5*(ROEALL(I,J,K,NBLCK)
+     &                     +      ANSROE(NFACE,NPOINT))
+  750 CONTINUE
+C
+  700 CONTINUE
+C
+C     END OF PTYPE = 'N' INTERPOLATION
+C
+      RETURN
+      END
+C
+C*****************************************************************************
+C*****************************************************************************
+C
+C
+      SUBROUTINE SLIDE_INTFACE
+C
+      INCLUDE 'commall-29'
+C
+C     THIS SUBROUTINE INTERPOLATES BETWEEN A PATCH AND ITS
+C     MATCHING SLIDING PATCHES.
+C     ALL SLIDING PATCHES MUST BE ON AN "I" FACE.
+C     THE SPANWISE (i.e. J) LOCATIONS OF THE GRID POINTS MUST BE THE SAME
+C     ON ALL ADJACENT SLIDING PATCHES.
+C     IT IS ASSUMED THAT THE SLIDING PATCHES ARE NUMBERED IN ORDER OF INCREASING
+C     THETA COORDINATE. i.e. THAT "NSFACE" INCREASES WITH THE ANGLE THETA. 
+C     
+C
+C
+      DIMENSION THETA_INT(NSLIDINT),RO_INT(NSLIDINT),ROE_INT(NSLIDINT),
+     &       ROVX_INT(NSLIDINT),ROVR_INT(NSLIDINT),RORVT_INT(NSLIDINT),
+     &       ANSRO(NSLIDFACE,NJM,NKM),ANSROE(NSLIDFACE,NJM,NKM),
+     &       ANSROVX(NSLIDFACE,NJM,NKM),ANSROVR(NSLIDFACE,NJM,NKM),
+     &       ANSRORVT(NSLIDFACE,NJM,NKM)
+C
+C
+C      WRITE(6,*) ' in SLIDE_INTFACE, NSLIDEFACE = ',NSLIDEFACE 
+C
+      DO 1000 NSFACE = 1,NSLIDEFACE
+C
+C
+      NBLCK  = NBLKSLIDE(NSFACE)
+      NPTCH  = NPCHSLIDE(NSFACE) 
+C
+      IS = IPATCHS(NPTCH,NBLCK)
+      IE = IS
+      JS = JPATCHS(NPTCH,NBLCK)
+      JE = JPATCHE(NPTCH,NBLCK)
+      KS = KPATCHS(NPTCH,NBLCK)
+      KE = KPATCHE(NPTCH,NBLCK)
+C
+      DTHETA_NOW   =  WROTBLK(NBLCK)*TIMTOT
+      THETA_SECTOR = 6.283185*FRAC_ANN(NSFACE)
+      FRACMIN      = 0.0001*THETA_SECTOR
+C
+C
+C      SET UP THE PARAMETERS TO INTERPOLATE ALONG A CONSTANT J LINE OVER ALL
+C      "N_NEXTFACE"  ADJACENT SLIDING FACES.
+C
+      DO 1000 J = JS,JE
+C
+C     LOOP OVER THE "N_NEXTFACE"  ADJACENT PATCHES FINDING THE VALUES ON THE CURRENT "J" LINE.
+C
+      NTHETA     = 0
+      THETA_LAST = 1000000.
+
+      DO 100 N = 1,N_NEXTFACE(NSFACE)      
+C
+      NXBLK      = NXBLK_SLIDE(NSFACE,N)
+      NXPCH      = NXPTCH_SLIDE(NSFACE,N)
+      DTHETA_NXT = WROTBLK(NXBLK)*TIMTOT
+C
+      NXIS   = IPATCHS(NXPCH,NXBLK)
+      NXIE   = NXIS
+      NXJS   = JPATCHS(NXPCH,NXBLK)
+      NXJE   = JPATCHE(NXPCH,NXBLK)
+      NXKS   = KPATCHS(NXPCH,NXBLK)
+      NXKE   = KPATCHE(NXPCH,NXBLK)
+      JNXT   = NXJS + J -JS
+C
+C
+      IF((IS.NE.IE).OR.(NXIS.NE.NXIE)) THEN
+      WRITE(6,*) ' SERIOUS ERROR. SLIDING FACE IS NOT AN "I" FACE. '
+      ENDIF
+C
+      IF((NXJS-NXJE).NE.(JS-JE)) THEN
+      WRITE(6,*) ' SERIOUS ERROR. DIFFERENT NUMBERS OF J POINTS ON SLIDI
+     &NG FACES. '
+      ENDIF
+C
+C     SET THE VALUES FOR INTERPOLATING IN THE ADJACENT SECTOR - NXBLK.
+C
+      DO 30    K = NXKS,NXKE
+      THETA_NXT  = RT(NXIS,JNXT,K,NXBLK)/R(NXIS,JNXT,K,NXBLK)
+     &           + DTHETA_NXT
+      IF(NTHETA.GT.0.AND.ABS(THETA_NXT-THETA_LAST).LT.FRACMIN) GO TO 25
+      NTHETA            = NTHETA + 1
+      THETA_INT(NTHETA) = THETA_NXT
+      RO_INT(NTHETA)    = ROALL(NXIS,JNXT,K,NXBLK)
+      ROE_INT(NTHETA)   = ROEALL(NXIS,JNXT,K,NXBLK)
+      ROVX_INT(NTHETA)  = ROVXALL(NXIS,JNXT,K,NXBLK)
+      ROVR_INT(NTHETA)  = ROVRALL(NXIS,JNXT,K,NXBLK)
+      RORVT_INT(NTHETA) = RORVTALL(NXIS,JNXT,K,NXBLK)
+      THETA_LAST        = THETA_NXT
+C
+   25 CONTINUE
+C
+   30 CONTINUE
+C
+C
+C     END OF LOOP OVER ALL ADJACENT BLOCKS AT A CONSTANT "J" VALUE.
+C
+  100 CONTINUE
+C
+C
+C     NOW INTERPOLATE IN THE VALUES FOUND ABOVE IN THE ADJACENT SECTOR TO FIND 
+C     THE VALUE AT THETA_NOW
+C
+      DO 40 K = KS,KE
+C
+      THETA_NOW = RT(IS,J,K,NBLCK)/R(IS,J,K,NBLCK) + DTHETA_NOW
+      SECTORS   = (THETA_NOW - THETA_INT(1))/THETA_SECTOR
+      IF(SECTORS.LT.0.0) THEN
+      ABSECTS   = ABS(SECTORS)
+      NADD      = INT(ABSECTS)
+      THETA_NOW = THETA_NOW + (1 + NADD)*THETA_SECTOR
+      ELSE
+      NADD      = INT(SECTORS)
+      THETA_NOW = THETA_NOW - NADD*THETA_SECTOR
+      ENDIF
+C
+C
+      CALL INTP(NTHETA,THETA_INT,   RO_INT,THETA_NOW,
+     &          ANSRO(NSFACE,J,K))
+      CALL INTP(NTHETA,THETA_INT,  ROE_INT,THETA_NOW,
+     &          ANSROE(NSFACE,J,K))
+      CALL INTP(NTHETA,THETA_INT, ROVX_INT,THETA_NOW,
+     &          ANSROVX(NSFACE,J,K))      
+      CALL INTP(NTHETA,THETA_INT, ROVR_INT,THETA_NOW,
+     &          ANSROVR(NSFACE,J,K))       
+      CALL INTP(NTHETA,THETA_INT,RORVT_INT,THETA_NOW,
+     &          ANSRORVT(NSFACE,J,K))  
+C
+   40 CONTINUE
+C
+C
+C      END OF LOOP OVER ALL SLIDING FACES
+C
+ 1000 CONTINUE
+C
+C
+C     NOW AVERAGE THE INTERPOLATED VALUES AND THE STORED VALUES AT ALL 
+C     SLIDING INTERFACES
+C
+      DO 2000 NSFACE = 1,NSLIDEFACE
+C
+      NBLCK  = NBLKSLIDE(NSFACE)
+      NPTCH  = NPCHSLIDE(NSFACE) 
+      IS     = IPATCHS(NPTCH,NBLCK)
+      JS     = JPATCHS(NPTCH,NBLCK)
+      JE     = JPATCHE(NPTCH,NBLCK)
+      KS     = KPATCHS(NPTCH,NBLCK)
+      KE     = KPATCHE(NPTCH,NBLCK)
+C
+      DO 2100 K=KS,KE
+      DO 2100 J=JS,JE
+      ROALL(IS,J,K,NBLCK)    = 0.5*(ROALL(IS,J,K,NBLCK) 
+     &                       + ANSRO(NSFACE,J,K))
+      ROEALL(IS,J,K,NBLCK)   = 0.5*(ROEALL(IS,J,K,NBLCK)
+     &                       + ANSROE(NSFACE,J,K))
+      ROVXALL(IS,J,K,NBLCK)  = 0.5*(ROVXALL(IS,J,K,NBLCK)
+     &                       + ANSROVX(NSFACE,J,K))
+      ROVRALL(IS,J,K,NBLCK)  = 0.5*(ROVRALL(IS,J,K,NBLCK)
+     &                       + ANSROVR(NSFACE,J,K))
+      RORVTALL(IS,J,K,NBLCK) = 0.5*(RORVTALL(IS,J,K,NBLCK)
+     &                       + ANSRORVT(NSFACE,J,K))
+ 2100 CONTINUE
+C
+ 2000 CONTINUE
+C 
+C
+      RETURN
+      END
+C
+C****************************************************************************
+C****************************************************************************
+C
+      SUBROUTINE EXBCONDS(NBLCK,IM,JM,KM,IMM1,JMM1,KMM1)
+C
+      INCLUDE 'commall-29'
+C
+      COMMON/BKSEC/
+     & RO(NIM,NJM,NKM),ROVX(NIM,NJM,NKM),ROVT(NIM,NJM,NKM),
+     & ROVR(NIM,NJM,NKM),ROE(NIM,NJM,NKM),HO(NIM,NJM,NKM),
+     & RORVT(NIM,NJM,NKM),VX(NIM,NJM,NKM),VT(NIM,NJM,NKM),
+     & VR(NIM,NJM,NKM),WT(NIM,NJM,NKM),ROWT(NIM,NJM,NKM),
+     & P(NIM,NJM,NKM),TSTATIC(NIM,NJM,NKM)
+C
+      CHARACTER*1 PTYPE
+C
+C     APPLY ANY EXIT REFLECTING OR NON-REFLECTING BOUNDARY CONDITIONS TO ALL EXIT
+C     BOUNDARIES .
+C
+C
+      DO 100 NPTCH = 1,NPATCH(NBLCK)
+C  
+      PTYPE   = PATCHTYPE(NPTCH,NBLCK)
+      IF(PTYPE.NE.'E') GO TO 100 
+C
+      FREFLCT = FREFLECT(NPTCH,NBLCK)
+      IEXBC   = I_EXBCS(NPTCH,NBLCK)
+      IPOUT   = I_POUT(NPTCH,NBLCK)
+C
+      IS  = IPATCHS(NPTCH,NBLCK)
+      IE  = IPATCHE(NPTCH,NBLCK)
+      JS  = JPATCHS(NPTCH,NBLCK)
+      JE  = JPATCHE(NPTCH,NBLCK)
+      KS  = KPATCHS(NPTCH,NBLCK)
+      KE  = KPATCHE(NPTCH,NBLCK)
+      JMID   = 0.5*(JS+JE)
+      KMID   = 0.5*(KS+KE)
+      IMID   = 0.5*(IS+IE)
+C
+C     FIND A NORMAL VECTOR AT THE CENTRE OF THE FACE
+C
+      IF(IS.EQ.IE) THEN
+      XDIFJ  = X(IS,JMID+1,KMID,NBLCK)  - X(IS,JMID-1,KMID,NBLCK) 
+      RDIFJ  = R(IS,JMID+1,KMID,NBLCK)  - R(IS,JMID-1,KMID,NBLCK)
+      TDIFJ  = RT(IS,JMID+1,KMID,NBLCK) - RT(IS,JMID-1,KMID,NBLCK) 
+      XDIFK  = X(IS,JMID,KMID+1,NBLCK)  - X(IS,JMID,KMID-1,NBLCK) 
+      RDIFK  = R(IS,JMID,KMID+1,NBLCK)  - R(IS,JMID,KMID-1,NBLCK)
+      TDIFK  = RT(IS,JMID,KMID+1,NBLCK) - RT(IS,JMID,KMID-1,NBLCK) 
+      XNORM  = RDIFJ*TDIFK - RDIFK*TDIFJ
+      RNORM  = TDIFJ*XDIFK - TDIFK*XDIFJ
+      TNORM  = XDIFJ*RDIFK - XDIFK*RDIFJ
+      ENDIF
+C
+      IF(JS.EQ.JE) THEN
+      XDIFI  = X(IMID+1,JS,KMID,NBLCK)  - X(IMID-1,JS,KMID,NBLCK) 
+      RDIFI  = R(IMID+1,JS,KMID,NBLCK)  - R(IMID-1,JS,KMID,NBLCK)
+      TDIFI  = RT(IMID+1,JS,KMID,NBLCK) - RT(IMID-1,JS,KMID,NBLCK) 
+      XDIFK  = X(IMID,JS,KMID+1,NBLCK)  - X(IMID,JS,KMID-1,NBLCK) 
+      RDIFK  = R(IMID,JS,KMID+1,NBLCK)  - R(IMID,JS,KMID-1,NBLCK)
+      TDIFK  = RT(IMID,JS,KMID+1,NBLCK) - RT(IMID,JS,KMID-1,NBLCK) 
+      XNORM  = -RDIFI*TDIFK + RDIFK*TDIFI
+      RNORM  = -TDIFI*XDIFK + TDIFK*XDIFI
+      TNORM  = -XDIFI*RDIFK + XDIFK*RDIFI
+      ENDIF
+C
+      IF(KS.EQ.KE) THEN
+      XDIFI  = X(IMID+1,JMID,KS,NBLCK)  - X(IMID-1,JMID,KS,NBLCK) 
+      RDIFI  = R(IMID+1,JMID,KS,NBLCK)  - R(IMID-1,JMID,KS,NBLCK)
+      TDIFI  = RT(IMID+1,JMID,KS,NBLCK) - RT(IMID-1,JMID,KS,NBLCK) 
+      XDIFJ  = X(IMID,JMID+1,KS,NBLCK)  - X(IMID,JMID-1,KS,NBLCK) 
+      RDIFJ  = R(IMID,JMID+1,KS,NBLCK)  - R(IMID,JMID-1,KS,NBLCK)
+      TDIFJ  = RT(IMID,JMID+1,KS,NBLCK) - RT(IMID,JMID-1,KS,NBLCK) 
+      XNORM  = -RDIFJ*TDIFI + RDIFI*TDIFJ
+      RNORM  = -TDIFJ*XDIFI + TDIFI*XDIFJ
+      TNORM  = -XDIFJ*RDIFI + XDIFI*RDIFJ
+      ENDIF
+C
+C     FORM A UNIT NORMAL VECTOR TO THE CENTRE OF THE FACE. THESE ARE POSITVE INWARDS 
+C     TO THE I=1 FACE, J=1 FACE or K=1 FACE.
+C
+      DLNORM = SQRT(XNORM*XNORM + RNORM*RNORM + TNORM*TNORM)
+      XNORM  = XNORM/DLNORM
+      RNORM  = RNORM/DLNORM
+      TNORM  = TNORM/DLNORM
+C
+C
+C     CALCULATE THE AVERAGE PRESSURE ON THE WHOLE EXIT BOUNDARY IF "IPOUT" = 2
+C
+      IF(IPOUT.EQ.2) THEN
+      POUTAVG = 0.0
+      DO 125 K=KS,KE
+      DO 125 J=JS,JE
+      DO 125 I=IS,IE
+      POUTAVG = POUTAVG + P(I,J,K)
+  125 CONTINUE
+      PFORCED = POUTAVG/(KE-KS+1)/(JE-JS+1)/(IE-IS+1)
+      ENDIF
+C
+C
+C     THE REMAINDER OF THE SUBROUTINE DEPENDS ON WHETHER THE EXIT
+C     BOUNDARY IS AN "I" , "J", OR "K"  FACE.
+C
+C
+C     IF THE EXIT BOUNDARY IS AN "I" FACE       
+C
+      IF(IS.EQ.IE) THEN
+C
+
+      IF(IPOUT.EQ.3.OR.IPOUT.EQ.-3) THEN
+C
+C     FORM THE EXIT PRESSURE FROM RADIAL EQUILIBRIUM IF IPOUT = 3.
+C     THIS ASSUMES AN AXISYMMETRIC GRID AND NEGLECTS ANY STREAMLINE CURVATURE.
+C     THE HUB (JS) PRESSURE IS FIXED IF IPOUT =3, THE CASING (JE) IF IPOUT = -3 .
+C
+      IF(IPOUT.EQ.-3) PFIXED  = POUT(NPTCH,JE,NBLCK)
+C
+      DO 127 J = JS,JE
+
+      VTOUT   = 0.0
+      ROVTOUT = 0.0
+      DO 126 K= KS,KE
+      VTOUT   = VTOUT   +   VT(IS,J,K)
+      ROVTOUT = ROVTOUT + ROVT(IS,J,K)
+  126 CONTINUE
+      VTOUT     = VTOUT/(KE-KS+1)
+      ROVTOUT   = ROVTOUT/(KE-KS+1)
+      RAD_ACCEL = ROVTOUT*VTOUT/RBLK(IS,J,1)
+      IF(J.GT.JS) THEN
+      RDIFF = RBLK(IS,J,1) - RBLK(IS,J-1,1)
+      PDIFF = PDIFF + 0.5*(RAD_ACCEL + RAD_ACCEL_P)*RDIFF
+      POUT(NPTCH,J,NBLCK) = POUT(NPTCH,JS,NBLCK) + PDIFF
+      ENDIF
+      RAD_ACCEL_P = RAD_ACCEL
+C
+  127 CONTINUE
+C 
+C     THE CASING PRESSURE IS|SPECIFIED IF IPOUT = -3 .
+C
+      IF(IPOUT.EQ.-3) THEN
+      PDIFF = POUT(NPTCH,JE,NBLCK) - PFIXED
+      DO 128 J=JS,JE
+      POUT(NPTCH,J,NBLCK) = POUT(NPTCH,J,NBLCK) - PDIFF
+  128 CONTINUE
+      ENDIF
+C
+C    END OF IPOUT = 3 OPTION
+C
+      ENDIF
+C
+C
+C
+      DO 131 J=JS,JE
+C
+C     FORM THE AVERAGE PRESSURE IN THE " K " DIRECTTION IF IPOUT = 1.
+C     THE PRESSURE AT THE EXIT IS ADJUSTED SO THAT THIS VALUE IS EQUAL 
+C     TO THE VALUE SET BY POUT(NPTCH,J,NBLCK).
+C
+      IF(IPOUT.EQ.1) THEN
+C
+      PAVGOUT = 0.0
+      DO 130 K=KS,KE
+      PAVGOUT = PAVGOUT + P(IS,J,K)
+  130 CONTINUE
+      PFORCED = PAVGOUT/(KE-KS+1)
+C
+C     END OF IPOUT = 1 OPTION
+C
+      ENDIF
+C
+C
+      DO 132 K=KS,KE
+C
+      VNORM = VX(IS,J,K)*XNORM + VR(IS,J,K)*RNORM + VT(IS,J,K)*TNORM
+C
+      IF(IS.EQ.1.AND.VNORM.LT.0.0)   GO TO 135
+      IF(IS.EQ.IM.AND.VNORM.GT.0.0)  GO TO 135
+C
+C   IF FLOW IS ENTERING THROUGH THE EXIT BOUNDARY - SET VNORM TO STOP IT.
+C
+      DELVN        = -VNORM
+      VX(IS,J,K)   = VX(IS,J,K) + DELVN*XNORM
+      VR(IS,J,K)   = VR(IS,J,K) + DELVN*RNORM
+      VT(IS,J,K)   = VT(IS,J,K) + DELVN*TNORM
+      ROVX(IS,J,K) = RO(IS,J,K)*VX(IS,J,K)
+      ROVT(IS,J,K) = RO(IS,J,K)*VT(IS,J,K)
+      ROVR(IS,J,K) = RO(IS,J,K)*VR(IS,J,K)
+      RORVT(IS,J,K)= ROVT(IS,J,K)*R(IS,J,K,NBLCK)
+      GO TO 132
+C
+  135 CONTINUE
+C
+      IF(IPOUT.EQ.0.OR.IPOUT.EQ.3.OR.IPOUT.EQ.-3) PFORCED = P(IS,J,K)
+C
+      IF(IEXBC.EQ.0) THEN
+      P(IS,J,K) =  POUT(NPTCH,J,NBLCK) + (P(IS,J,K) - PFORCED)
+      ENDIF
+
+      IF(IEXBC.EQ.1) THEN
+      DELP        = FREFLCT*(POUT(NPTCH,J,NBLCK) - PFORCED)
+      CSQ         = GAMR*TSTATIC(IS,J,K)
+      DELRO       = DELP/CSQ
+      IF(IS.EQ.1)   DELVN  =  DELP/RO(IS,J,K)/SQRT(CSQ)
+      IF(IS.EQ.IM)  DELVN  = -DELP/RO(IS,J,K)/SQRT(CSQ)
+      DELT        = FGA*DELP/RGAS/RO(IS,J,K)
+      DELE        = CV*DELT + VNORM*DELVN
+      EINT        = ROE(IS,J,K)/RO(IS,J,K)
+      P(IS,J,K)    = P(IS,J,K)  + DELP
+      RO(IS,J,K)   = RO(IS,J,K) + DELRO
+      VX(IS,J,K)   = VX(IS,J,K) + DELVN*XNORM
+      VR(IS,J,K)   = VR(IS,J,K) + DELVN*RNORM
+      VT(IS,J,K)   = VT(IS,J,K) + DELVN*TNORM
+      ROVX(IS,J,K) = RO(IS,J,K)*VX(IS,J,K)
+      ROVT(IS,J,K) = RO(IS,J,K)*VT(IS,J,K)
+      ROVR(IS,J,K) = RO(IS,J,K)*VR(IS,J,K)
+      RORVT(IS,J,K)= ROVT(IS,J,K)*R(IS,J,K,NBLCK)
+      ROE(IS,J,K)  = RO(IS,J,K)*(EINT + DELE) 
+      HO(IS,J,K)   = HO(IS,J,K) + CP*DELT +  VNORM*DELVN
+      ENDIF
+C   
+  132 CONTINUE
+  131 CONTINUE
+C
+      ENDIF 
+C
+C
+C
+C     IF THE EXIT BOUNDARY IS AN "J" FACE       
+C
+      IF(JS.EQ.JE) THEN
+C
+      DO 141 I=IS,IE
+C
+C     FORM THE AVERAGE PRESSURE IN THE " K " DIRECTTION
+C
+      IF(IPOUT.EQ.1) THEN
+      PAVGOUT = 0.0
+      DO 140 K=KS,KE
+      PAVGOUT = PAVGOUT + P(I,JS,K)
+  140 CONTINUE
+      PFORCED = PAVGOUT/(KE-KS+1)
+      ENDIF
+C
+      DO 142 K=KS,KE
+C
+      VNORM = VX(I,JS,K)*XNORM + VR(I,JS,K)*RNORM + VT(I,JS,K)*TNORM
+C
+      IF(JS.EQ.1.AND.VNORM.LT.0.0)   GO TO 145
+      IF(JS.EQ.JM.AND.VNORM.GT.0.0)  GO TO 145
+C
+C   IF FLOW IS ENTERING THROUGH THE EXIT BOUNDARY - SET VNORM TO STOP IT.
+C
+      DELVN        = -VNORM
+      VX(I,JS,K)   = VX(I,JS,K) + DELVN*XNORM
+      VR(I,JS,K)   = VR(I,JS,K) + DELVN*RNORM
+      VT(I,JS,K)   = VT(I,JS,K) + DELVN*TNORM
+      ROVX(I,JS,K) = RO(I,JS,K)*VX(I,JS,K)
+      ROVT(I,JS,K) = RO(I,JS,K)*VT(I,JS,K)
+      ROVR(I,JS,K) = RO(I,JS,K)*VR(I,JS,K)
+      RORVT(I,JS,K)= ROVT(I,JS,K)*R(I,JS,K,NBLCK)
+      GO TO 142
+C
+  145 CONTINUE
+C
+      IF(IPOUT.EQ.0)  PFORCED = P(I,JS,K)
+C
+      IF(IEXBC.EQ.0) THEN
+      P(I,JS,K) =  POUT(NPTCH,1,NBLCK) + (P(I,JS,K) - PFORCED)
+      ENDIF
+
+      IF(IEXBC.EQ.1) THEN
+      DELP        = FREFLCT*(POUT(NPTCH,1,NBLCK) - PFORCED)
+      CSQ         = GAMR*TSTATIC(I,JS,K)
+      DELRO       = DELP/CSQ
+      IF(JS.EQ.1)   DELVN  =  DELP/RO(I,JS,K)/SQRT(CSQ)
+      IF(JS.EQ.JM)  DELVN  = -DELP/RO(I,JS,K)/SQRT(CSQ)
+      DELT        = FGA*DELP/RGAS/RO(I,JS,K)
+      DELE        = CV*DELT + VNORM*DELVN
+      EINT        = ROE(I,JS,K)/RO(I,JS,K)
+      P(I,JS,K)    = P(I,JS,K)  + DELP
+      RO(I,JS,K)   = RO(I,JS,K) + DELRO
+      VX(I,JS,K)   = VX(I,JS,K) + DELVN*XNORM
+      VR(I,JS,K)   = VR(I,JS,K) + DELVN*RNORM
+      VT(I,JS,K)   = VT(I,JS,K) + DELVN*TNORM
+      ROVX(I,JS,K) = RO(I,JS,K)*VX(I,JS,K)
+      ROVT(I,JS,K) = RO(I,JS,K)*VT(I,JS,K)
+      ROVR(I,JS,K) = RO(I,JS,K)*VR(I,JS,K)
+      RORVT(I,JS,K)= ROVT(I,JS,K)*R(I,JS,K,NBLCK)
+      ROE(I,JS,K)  = RO(I,JS,K)*(EINT + DELE) 
+      HO(I,JS,K)   = HO(I,JS,K) + CP*DELT +  VNORM*DELVN
+      ENDIF
+C   
+  142 CONTINUE
+  141 CONTINUE
+C
+      ENDIF 
+C
+C
+C
+C     IF THE EXIT BOUNDARY IS AN "K" FACE       
+C
+      IF(KS.EQ.KE) THEN
+C
+      DO 151 J=JS,JE
+C
+C     FORM THE AVERAGE PRESSURE IN THE " I " DIRECTTION
+C
+      IF(IPOUT.EQ.1) THEN
+      PAVGOUT = 0.0
+      DO 150 I=IS,IE
+      PAVGOUT = PAVGOUT + P(I,J,KS)
+  150 CONTINUE
+      PFORCED = PAVGOUT/(IE-IS+1)
+      ENDIF
+C
+      DO 152 I=IS,IE
+C
+      VNORM = VX(I,J,KS)*XNORM + VR(I,J,KS)*RNORM + VT(I,J,KS)*TNORM
+C
+      IF(KS.EQ.1.AND.VNORM.LT.0.0)   GO TO 155
+      IF(KS.EQ.KM.AND.VNORM.GT.0.0)  GO TO 155
+C
+C   IF FLOW IS ENTERING THROUGH THE EXIT BOUNDARY - SET VNORM TO STOP IT.
+C
+      DELVN        = -VNORM
+      VX(I,J,KS)   = VX(I,J,KS) + DELVN*XNORM
+      VR(I,J,KS)   = VR(I,J,KS) + DELVN*RNORM
+      VT(I,J,KS)   = VT(I,J,KS) + DELVN*TNORM
+      ROVX(I,J,KS) = RO(I,J,KS)*VX(I,J,KS)
+      ROVT(I,J,KS) = RO(I,J,KS)*VT(I,J,KS)
+      ROVR(I,J,KS) = RO(I,J,KS)*VR(I,J,KS)
+      RORVT(I,J,KS)= ROVT(I,J,KS)*R(I,J,KS,NBLCK)
+      GO TO 152
+C
+  155 CONTINUE
+C
+      IF(IPOUT.EQ.0)  PFORCED = P(I,J,KS)
+C
+      IF(IEXBC.EQ.0) THEN
+      P(I,J,KS) =  POUT(NPTCH,J,NBLCK) + (P(I,J,KS) - PFORCED)
+      ENDIF
+
+      IF(IEXBC.EQ.1) THEN
+      DELP        = FREFLCT*(POUT(NPTCH,J,NBLCK) - PFORCED)
+      CSQ         = GAMR*TSTATIC(I,J,KS)
+      DELRO       = DELP/CSQ
+      IF(KS.EQ.1)   DELVN  =  DELP/RO(I,J,KS)/SQRT(CSQ)
+      IF(KS.EQ.KM)  DELVN  = -DELP/RO(I,J,KS)/SQRT(CSQ)
+      DELT        = FGA*DELP/RGAS/RO(I,J,KS)
+      DELE        = CV*DELT + VNORM*DELVN
+      EINT        = ROE(I,J,KS)/RO(I,J,KS)
+      P(I,J,KS)    = P(I,J,KS)  + DELP
+      RO(I,J,KS)   = RO(I,J,KS) + DELRO
+      VX(I,J,KS)   = VX(I,J,KS) + DELVN*XNORM
+      VR(I,J,KS)   = VR(I,J,KS) + DELVN*RNORM
+      VT(I,J,KS)   = VT(I,J,KS) + DELVN*TNORM
+      ROVX(I,J,KS) = RO(I,J,KS)*VX(I,J,KS)
+      ROVT(I,J,KS) = RO(I,J,KS)*VT(I,J,KS)
+      ROVR(I,J,KS) = RO(I,J,KS)*VR(I,J,KS)
+      RORVT(I,J,KS)= ROVT(I,J,KS)*R(I,J,KS,NBLCK)
+      ROE(I,J,KS)  = RO(I,J,KS)*(EINT + DELE) 
+      HO(I,J,KS)   = HO(I,J,KS) + CP*DELT +  VNORM*DELVN
+      ENDIF
+C   
+  152 CONTINUE
+  151 CONTINUE
+C
+      ENDIF 
+C
+  100 CONTINUE
+C
+C
+      RETURN
+      END
