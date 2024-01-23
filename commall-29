@@ -201,6 +201,7 @@ C
 C     CONV_HISTORY is the number of historic sets of 25-time steps which is considered
 C                  for automatic convergence check.
 c     ERROR        is the acceptable error across the entire historic set     
+      INTEGER CONV_HISTORY
       PARAMETER (CONV_HISTORY=20)
 
       COMMON/CONV/
