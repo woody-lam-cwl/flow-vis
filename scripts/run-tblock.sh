@@ -31,7 +31,7 @@ function run_deltagen() {
 }
 
 function run_tblock() {
-    if [[ -z $1 ]]; then
+    if [[ $? -eq 0 ]]; then
         echo "No directory provided. No op."
         exit 0
     fi
