@@ -199,10 +199,10 @@ C
      & PLIFT,PDRAG,VLIFT,VDRAG,AWING,P_DYNAMIC_IN
 C
 C     CONV_HISTORY is the number of historic sets of 25-time steps which is considered
-C                  for automatic convergence check.
-c     ERROR        is the acceptable error across the entire historic set     
-      PARAMETER (CONV_HISTORY=20, ERROR=0.05)
-      REAL :: LAST_CLIFT(10), LAST_CDRAG(10)
+C                  for automatic convergence check.   
+      INTEGER CONV_HISTORY
+      PARAMETER (CONV_HISTORY=5)
+      REAL :: LAST_CLIFT(CONV_HISTORY), LAST_CDRAG(CONV_HISTORY)
       COMMON/CONV/
      & LAST_CLIFT,LAST_CDRAG
 C     
