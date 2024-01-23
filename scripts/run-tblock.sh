@@ -1,4 +1,5 @@
 function run_deltagen() {
+    nl=$'\n'
     name=$1
     mach=$2
     reynolds=$3
@@ -13,7 +14,7 @@ function run_deltagen() {
     wing_type=$11
 
     script_dir=$( dirname "${BASH_SOURCE[0]}" )
-    input=$'$name\n$mach\n$reynolds\n$aoa\n$sweep\n$grid_scale\n$half_span\n$height_ratio\n$time_factor\n$smooth_factor\n$steps\n$wing_type\n'
+    input="$name$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl"
     echo $"Running deltagen with input:"
     echo "${input}"
     $script_dir/../deltagen <<< $input > /dev/null
