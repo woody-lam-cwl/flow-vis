@@ -20,7 +20,7 @@ function run_deltagen() {
     echo "${input}"
     $script_dir/../deltagen <<< $input > /dev/null
 
-    if [[ -z $? ]]; then
+    if [[ $? -eq 0 ]]; then
         echo "Deltagen complete"
     else
         echo "Deltagen failed"
@@ -31,7 +31,7 @@ function run_deltagen() {
 }
 
 function run_tblock() {
-    if [[ $? -eq 0 ]]; then
+    if [[ -z $1 ]]; then
         echo "No directory provided. No op."
         exit 0
     fi
