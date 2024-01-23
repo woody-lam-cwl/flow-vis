@@ -3048,7 +3048,8 @@ C
       END
 C
 C*****************************************************************************
-      SUBROUTINE UPDATE_CONV(LAST_CLIFT, LAST_CDRAG, CLIFT, CDRAG, CONV_HISTORY)
+      SUBROUTINE UPDATE_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG,
+            CONV_HISTORY)
 
       DO I = 1,CONV_HISTORY-1
       LAST_CLIFT(I+1) = LAST_CLIFT(I)
@@ -3060,7 +3061,8 @@ C*****************************************************************************
 
       END
 C******************************************************************************
-      SUBROUTINE HAS_CONV(LAST_CLIFT, LAST_CDRAG, CLIFT, CDRAG, ERROR, CONV_HISTORY)
+      SUBROUTINE HAS_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG,
+            ERROR,CONV_HISTORY)
 
       DO I = 1,CONV_HISTORY
       CLIFT_ERROR = ABS(LAST_CLIFT(I) - CLIFT) / CLIFT
