@@ -10,6 +10,7 @@ C
       LAST_CDRAG(I) = -1
       END DO
 C     
+      ERROR = 0.1
 C
 C
       READ(5,'(A)') OUTPUT_PATH
@@ -200,7 +201,7 @@ C
 C
 C**********Call to the main solver routine SET_FLUX. WHICH CALLS SUM_FLUX AND NUSMOOTH.
 C
-      CALL SET_FLUX
+      CALL SET_FLUX(LAST_CLIFT,LAST_CDRAG,ERROR)
 C
 C**********Call BCONDS to apply all boundary conditions.
 C
@@ -3079,7 +3080,7 @@ C******************************************************************************
       END
 C******************************************************************************
 C
-      SUBROUTINE SET_FLUX(LAST_CLIFT, LAST_CDRAG)
+      SUBROUTINE SET_FLUX(LAST_CLIFT,LAST_CDRAG,ERROR)
 C
       INCLUDE 'commall-29'
 C
