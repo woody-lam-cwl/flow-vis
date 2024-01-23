@@ -20,12 +20,12 @@ function run_deltagen() {
     echo "${input}"
     failures="$( $script_dir/../deltagen <<< $input > /dev/null )"
 
-    if [[ -z $failures]]; then
+    if [[ -z $failures ]]; then
         echo "Deltagen complete"
     else
         echo "Deltagen failed"
     fi
-    
+
     echo $input > $script_dir/../results/$name/run_configurations.dat
 }
 
