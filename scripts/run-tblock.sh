@@ -24,6 +24,7 @@ function run_deltagen() {
         echo "Deltagen complete"
     else
         echo "Deltagen failed"
+        exit 1
     fi
 
     echo $input > $script_dir/../results/$name/run_configurations.dat
