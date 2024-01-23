@@ -204,7 +204,7 @@ c     ERROR        is the acceptable error across the entire historic set
       PARAMETER (CONV_HISTORY=20)
 
       COMMON/CONV/
-     & LAST_CLIFT(CONV_HISTORY),LAST_CDRAG(CONV_HISTORY)
+     & LAST_CLIFT(CONV_HISTORY),LAST_CDRAG(CONV_HISTORY),CONV_HISTORY
 C     
       DOUBLE PRECISION  XPIN,RPIN,RTPIN
 C
