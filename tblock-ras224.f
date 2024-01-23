@@ -198,7 +198,7 @@ C
 C
 C**********Call to the main solver routine SET_FLUX. WHICH CALLS SUM_FLUX AND NUSMOOTH.
 C
-      CALL SET_FLUX(LAST_CLIFT,LAST_CDRAG,ERROR,CONV_HISTORY)
+      CALL SET_FLUX(OUTPUT_PATH)
 C
 C**********Call BCONDS to apply all boundary conditions.
 C
@@ -3048,8 +3048,9 @@ C
       END
 C
 C*****************************************************************************
-      SUBROUTINE UPDATE_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG,
-            CONV_HISTORY)
+      SUBROUTINE UPDATE_CONV(CLIFT, CDRAG)
+
+      INCLUDE 'commall-29'
 
       DO I = 1,CONV_HISTORY-1
       LAST_CLIFT(I+1) = LAST_CLIFT(I)
@@ -3061,8 +3062,9 @@ C*****************************************************************************
 
       END
 C******************************************************************************
-      SUBROUTINE HAS_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG,
-            ERROR,CONV_HISTORY)
+      SUBROUTINE HAS_CONV(OUTPUT_PATH, CLIFT, CDRAG, ERROR)
+
+      INCLUDE 'commall-29'
 
       DO I = 1,CONV_HISTORY
       CLIFT_ERROR = ABS(LAST_CLIFT(I) - CLIFT) / CLIFT
@@ -3082,7 +3084,7 @@ C******************************************************************************
       END
 C******************************************************************************
 C
-      SUBROUTINE SET_FLUX(LAST_CLIFT,LAST_CDRAG,ERROR,CONV_HISTORY)
+      SUBROUTINE SET_FLUX(OUTPUT_PATH)
 C
       INCLUDE 'commall-29'
 C
@@ -3632,8 +3634,8 @@ C
       CLIFT = (PLIFT+VLIFT)/AWING/P_DYNAMIC_IN
       CDRAG = (PDRAG+VDRAG)/AWING/P_DYNAMIC_IN
 
-      CALL HAS_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG,ERROR,CONV_HISTORY)
-      CALL UPDATE_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG,CONV_HISTORY)
+      CALL HAS_CONV(OUTPUT_PATH,CLIFT,CDRAG,ERROR)
+      CALL UPDATE_CONV(CLIFT,CDRAG)
 C
 C
 C      WRITE OUT THE INLET AND OUTLET FLOW AND EFFICIENCY EVERY 25 STEPS.
