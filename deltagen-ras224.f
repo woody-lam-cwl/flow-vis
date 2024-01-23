@@ -47,7 +47,7 @@ C
       
       IF (RESULTS_EXIST) THEN
       	WRITE(6,*) 'Directory already exist: '//TRIM(OUTPUT_PATH)
-      	STOP 9
+      	CALL EXIT(1)
       ELSE
       	CALL system('mkdir -p '//TRIM(OUTPUT_PATH))
       ENDIF
