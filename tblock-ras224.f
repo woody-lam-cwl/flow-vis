@@ -3050,8 +3050,36 @@ C
       END
 C
 C*****************************************************************************
+      SUBROUTINE UPDATE_CONV(LAST_CLIFT, LAST_CDRAG, CLIFT, CDRAG)
+
+      DO I = 1,9
+      LAST_CLIFT(I+1) = LAST_CLIFT(I)
+      LAST_CDRAG(I+1) = LAST_CDRAG(I)
+      END DO
+
+      LAST_CLIFT(1) = CLIFT
+      LAST_CDRAG(1) = CDRAG
+
+      END
+C******************************************************************************
+      SUBROUTINE HAS_CONV(LAST_CLIFT, LAST_CDRAG, CLIFT, CDRAG, ERROR)
+
+      DO I = 1,10
+      CLIFT_ERROR = ABS(LAST_CLIFT(I) - CLIFT) / CLIFT
+      CDRAG_ERROR = ABS(LAST_CDRAG(I) - CDRAG) / CDRAG
+
+      IF (CLIFT_ERROR.GT.ERROR.OR.CDRAG_ERROR.GT.ERROR) THEN
+      CALL EXIT
+      ENDIF
+      END DO
+
+      OPEN(UNIT=11,FILE=TRIM(OUTPUT_PATH) // 'stopit')      
+      WRITE(11,*) 2
+      CLOSE(11)
+      END
+C******************************************************************************
 C
-      SUBROUTINE SET_FLUX
+      SUBROUTINE SET_FLUX(LAST_CLIFT, LAST_CDRAG)
 C
       INCLUDE 'commall-29'
 C
@@ -3600,6 +3628,9 @@ C
       TRAT_IS  = (POAVGOUT/POAVGIN)**FGA
       CLIFT = (PLIFT+VLIFT)/AWING/P_DYNAMIC_IN
       CDRAG = (PDRAG+VDRAG)/AWING/P_DYNAMIC_IN
+
+      CALL HAS_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG,ERROR)
+      CALL UPDATE_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG)
 C
 C
 C      WRITE OUT THE INLET AND OUTLET FLOW AND EFFICIENCY EVERY 25 STEPS.
