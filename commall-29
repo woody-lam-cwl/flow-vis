@@ -201,7 +201,7 @@ C
 C     CONV_HISTORY is the number of historic sets of 25-time steps which is considered
 C                  for automatic convergence check.   
       INTEGER CONV_HISTORY
-      PARAMETER (CONV_HISTORY=30)
+      PARAMETER (CONV_HISTORY=40)
       REAL :: LAST_CLIFT(CONV_HISTORY), LAST_CDRAG(CONV_HISTORY)
       COMMON/CONV/
      & LAST_CLIFT,LAST_CDRAG

@@ -3066,7 +3066,7 @@ C******************************************************************************
 
       INCLUDE 'commall-29'
 
-      ERROR = 0.05
+      ERROR = 0.01
 
       DO I = 1,CONV_HISTORY
       CLIFT_ERROR = ABS((LAST_CLIFT(I) - CLIFT) / CLIFT)
