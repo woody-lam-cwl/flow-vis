@@ -18,8 +18,14 @@ function run_deltagen() {
     input="$name$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl"
     echo "Running deltagen with input:"
     echo "${input}"
-    echo "$( $script_dir/../deltagen <<< $input > /dev/null )"
-    echo "Deltagen complete"
+    failures="$( $script_dir/../deltagen <<< $input > /dev/null )"
+
+    if [[ -z $failures]]; then
+        echo "Deltagen complete"
+    else
+        echo "Deltagen failed"
+    fi
+    
     echo $input > $script_dir/../results/$name/run_configurations.dat
 }
 
