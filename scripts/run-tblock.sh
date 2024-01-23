@@ -14,8 +14,6 @@ function run_deltagen() {
     steps=10000
     wing_type=${arg_arr[10]}
 
-    echo "${arg_arr}"
-
     script_dir=$( dirname "${BASH_SOURCE[0]}" )
     input="$name$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl"
     echo "Running deltagen with input:"
@@ -39,5 +37,5 @@ function run_tblock() {
     echo "Run completed for path ${target_dir}"
 }
 
-run_deltagen $1 $2 $3 $4 $5 $6 $7 $8 $9 $10 $11
+run_deltagen "$@"
 run_tblock $1
