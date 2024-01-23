@@ -1,0 +1,1 @@
+../tblock < results/$1/delta-tblock.dat > results/$1/tblock.log
