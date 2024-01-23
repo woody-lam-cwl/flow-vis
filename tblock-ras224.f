@@ -296,7 +296,7 @@ C
   346 CONTINUE
       WRITE(6,*)  'CFL NUMBER', CFL
 C
-      NSTEPS    = 3000
+      NSTEPS    = 10000
       NCHANGE   = 1000
       NSTEPUP   = 5
       IFRESTART = 0
@@ -3066,7 +3066,7 @@ C******************************************************************************
 
       INCLUDE 'commall-29'
 
-      ERROR = 0.10
+      ERROR = 0.05
 
       DO I = 1,CONV_HISTORY
       CLIFT_ERROR = ABS((LAST_CLIFT(I) - CLIFT) / CLIFT)
