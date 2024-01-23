@@ -3,6 +3,13 @@ C
 C      MULTIBLOCK FLOW SOLVER. DEVELOPMENT STARTED BY JDD  3/4/2000.
 C
       INCLUDE 'commall-29'
+      
+C
+      DO I = 1, 10
+      LAST_CLIFT(I) = -1
+      LAST_CDRAG(I) = -1
+      END DO
+C     
 C
 C
       READ(5,'(A)') OUTPUT_PATH
