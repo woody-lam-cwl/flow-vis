@@ -5,14 +5,11 @@ C
       INCLUDE 'commall-29'
       
 C
-      DO I = 1, 10
+      DO I = 1,CONV_HISTORY
       LAST_CLIFT(I) = -1
       LAST_CDRAG(I) = -1
       END DO
 C     
-      ERROR = 0.1
-C
-C
       READ(5,'(A)') OUTPUT_PATH
       OUTPUT_PATH = ADJUSTL(OUTPUT_PATH)
       WRITE(6,*) OUTPUT_PATH
@@ -201,7 +198,7 @@ C
 C
 C**********Call to the main solver routine SET_FLUX. WHICH CALLS SUM_FLUX AND NUSMOOTH.
 C
-      CALL SET_FLUX(LAST_CLIFT,LAST_CDRAG,ERROR)
+      CALL SET_FLUX(LAST_CLIFT,LAST_CDRAG,ERROR,CONV_HISTORY)
 C
 C**********Call BCONDS to apply all boundary conditions.
 C
@@ -3051,9 +3048,9 @@ C
       END
 C
 C*****************************************************************************
-      SUBROUTINE UPDATE_CONV(LAST_CLIFT, LAST_CDRAG, CLIFT, CDRAG)
+      SUBROUTINE UPDATE_CONV(LAST_CLIFT, LAST_CDRAG, CLIFT, CDRAG, CONV_HISTORY)
 
-      DO I = 1,9
+      DO I = 1,CONV_HISTORY-1
       LAST_CLIFT(I+1) = LAST_CLIFT(I)
       LAST_CDRAG(I+1) = LAST_CDRAG(I)
       END DO
@@ -3063,9 +3060,9 @@ C*****************************************************************************
 
       END
 C******************************************************************************
-      SUBROUTINE HAS_CONV(LAST_CLIFT, LAST_CDRAG, CLIFT, CDRAG, ERROR)
+      SUBROUTINE HAS_CONV(LAST_CLIFT, LAST_CDRAG, CLIFT, CDRAG, ERROR, CONV_HISTORY)
 
-      DO I = 1,10
+      DO I = 1,CONV_HISTORY
       CLIFT_ERROR = ABS(LAST_CLIFT(I) - CLIFT) / CLIFT
       CDRAG_ERROR = ABS(LAST_CDRAG(I) - CDRAG) / CDRAG
 
@@ -3080,7 +3077,7 @@ C******************************************************************************
       END
 C******************************************************************************
 C
-      SUBROUTINE SET_FLUX(LAST_CLIFT,LAST_CDRAG,ERROR)
+      SUBROUTINE SET_FLUX(LAST_CLIFT,LAST_CDRAG,ERROR,CONV_HISTORY)
 C
       INCLUDE 'commall-29'
 C
@@ -3630,8 +3627,8 @@ C
       CLIFT = (PLIFT+VLIFT)/AWING/P_DYNAMIC_IN
       CDRAG = (PDRAG+VDRAG)/AWING/P_DYNAMIC_IN
 
-      CALL HAS_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG,ERROR)
-      CALL UPDATE_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG)
+      CALL HAS_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG,ERROR,CONV_HISTORY)
+      CALL UPDATE_CONV(LAST_CLIFT,LAST_CDRAG,CLIFT,CDRAG,CONV_HISTORY)
 C
 C
 C      WRITE OUT THE INLET AND OUTLET FLOW AND EFFICIENCY EVERY 25 STEPS.
@@ -3651,6 +3648,9 @@ C
       WRITE(6,*) ' INLET DYNAMIC HEAD = ', P_DYNAMIC_IN
       WRITE(6,*) ' TOTAL LIFT COEFF.= ', CLIFT
       WRITE(6,*) ' TOTAL DRAG COEFF.= ', CDRAG
+      WRITE(6,*) ' PREVIOUS LIFTS.= ', LAST_CLIFT
+      WRITE(6,*) ' PREVIOUS DRAGS.= ', LAST_CDRAG
+
       
       WRITE(7,*) NSTEP, ',', CLIFT, ',', CDRAG
 
