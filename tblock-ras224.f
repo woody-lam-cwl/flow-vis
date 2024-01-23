@@ -5,7 +5,6 @@ C
       INCLUDE 'commall-29'
       
 C
-      ERROR=0.05
       DO I = 1,CONV_HISTORY
       LAST_CLIFT(I) = -1
       LAST_CDRAG(I) = -1

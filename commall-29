@@ -202,7 +202,7 @@ C     CONV_HISTORY is the number of historic sets of 25-time steps which is cons
 C                  for automatic convergence check.
 c     ERROR        is the acceptable error across the entire historic set     
       INTEGER CONV_HISTORY
-      PARAMETER (CONV_HISTORY=20)
+      PARAMETER (CONV_HISTORY=20, ERROR=0.05)
 
       COMMON/CONV/
      & LAST_CLIFT(CONV_HISTORY),LAST_CDRAG(CONV_HISTORY),CONV_HISTORY
