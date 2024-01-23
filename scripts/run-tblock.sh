@@ -1,17 +1,17 @@
 function run_deltagen() {
     nl=$'\n'
-    name=$1
-    mach=$2
-    reynolds=$3
-    aoa=$4
-    sweep=$5
-    grid_scale=$6
-    half_span=$7
-    height_ratio=$8
-    time_factor=$9
-    smooth_factor=${10}
+    name=$@[0]
+    mach=$@[1]
+    reynolds=$@[2]
+    aoa=$@[3]
+    sweep=$@[4]
+    grid_scale=$@[5]
+    half_span=$@[6]
+    height_ratio=$@[7]
+    time_factor=$@[8]
+    smooth_factor=$@[9]
     steps=10000
-    wing_type=${11}
+    wing_type=$@[10]
 
     script_dir=$( dirname "${BASH_SOURCE[0]}" )
     input="$name$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl"
