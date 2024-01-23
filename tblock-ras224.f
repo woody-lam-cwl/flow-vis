@@ -3,8 +3,13 @@ C
 C      MULTIBLOCK FLOW SOLVER. DEVELOPMENT STARTED BY JDD  3/4/2000.
 C
       INCLUDE 'commall-29'
+      
 C
-C
+      DO I = 1,CONV_HISTORY
+      LAST_CLIFT(I) = -1
+      LAST_CDRAG(I) = -1
+      END DO
+C     
       READ(5,'(A)') OUTPUT_PATH
       OUTPUT_PATH = ADJUSTL(OUTPUT_PATH)
       WRITE(6,*) OUTPUT_PATH
@@ -193,7 +198,7 @@ C
 C
 C**********Call to the main solver routine SET_FLUX. WHICH CALLS SUM_FLUX AND NUSMOOTH.
 C
-      CALL SET_FLUX
+      CALL SET_FLUX(OUTPUT_PATH)
 C
 C**********Call BCONDS to apply all boundary conditions.
 C
@@ -291,7 +296,7 @@ C
   346 CONTINUE
       WRITE(6,*)  'CFL NUMBER', CFL
 C
-      NSTEPS    = 3000
+      NSTEPS    = 10000
       NCHANGE   = 1000
       NSTEPUP   = 5
       IFRESTART = 0
@@ -3043,8 +3048,44 @@ C
       END
 C
 C*****************************************************************************
+      SUBROUTINE UPDATE_CONV(CLIFT, CDRAG)
+
+      INCLUDE 'commall-29'
+
+      DO I = CONV_HISTORY-1,1,-1
+      LAST_CLIFT(I+1) = LAST_CLIFT(I)
+      LAST_CDRAG(I+1) = LAST_CDRAG(I)
+      END DO
+
+      LAST_CLIFT(1) = CLIFT
+      LAST_CDRAG(1) = CDRAG
+
+      END
+C******************************************************************************
+      SUBROUTINE HAS_CONV(OUTPUT_PATH, CLIFT, CDRAG)
+
+      INCLUDE 'commall-29'
+
+      ERROR = 0.01
+
+      DO I = 1,CONV_HISTORY
+      CLIFT_ERROR = ABS((LAST_CLIFT(I) - CLIFT) / CLIFT)
+      CDRAG_ERROR = ABS((LAST_CDRAG(I) - CDRAG) / CDRAG)
+      LAST_CLIFT_OVER_CDRAG = LAST_CLIFT(I) / LAST_CDRAG(I)
+
+      IF ((CLIFT_ERROR > ERROR) .OR. (CDRAG_ERROR > ERROR)) THEN
+      RETURN
+      ENDIF
+      END DO
+
+      WRITE(6,*) "*** CONVERGENCE IDENTIFIED: WILL BE EXITING ***"
+      OPEN(UNIT=11,FILE=TRIM(OUTPUT_PATH) // 'stopit')      
+      WRITE(11,*) 2
+      CLOSE(11)
+      END
+C******************************************************************************
 C
-      SUBROUTINE SET_FLUX
+      SUBROUTINE SET_FLUX(OUTPUT_PATH)
 C
       INCLUDE 'commall-29'
 C
@@ -3593,6 +3634,9 @@ C
       TRAT_IS  = (POAVGOUT/POAVGIN)**FGA
       CLIFT = (PLIFT+VLIFT)/AWING/P_DYNAMIC_IN
       CDRAG = (PDRAG+VDRAG)/AWING/P_DYNAMIC_IN
+
+      CALL HAS_CONV(OUTPUT_PATH,CLIFT,CDRAG)
+      CALL UPDATE_CONV(CLIFT,CDRAG)
 C
 C
 C      WRITE OUT THE INLET AND OUTLET FLOW AND EFFICIENCY EVERY 25 STEPS.
@@ -3612,6 +3656,9 @@ C
       WRITE(6,*) ' INLET DYNAMIC HEAD = ', P_DYNAMIC_IN
       WRITE(6,*) ' TOTAL LIFT COEFF.= ', CLIFT
       WRITE(6,*) ' TOTAL DRAG COEFF.= ', CDRAG
+      WRITE(6,*) ' PREVIOUS LIFTS.= ', LAST_CLIFT
+      WRITE(6,*) ' PREVIOUS DRAGS.= ', LAST_CDRAG
+
       
       WRITE(7,*) NSTEP, ',', CLIFT, ',', CDRAG
 
