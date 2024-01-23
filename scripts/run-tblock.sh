@@ -9,9 +9,9 @@ function run_deltagen() {
     half_span=$7
     height_ratio=$8
     time_factor=$9
-    smooth_factor=$10
+    smooth_factor=${10}
     steps=10000
-    wing_type=$11
+    wing_type=${11}
 
     script_dir=$( dirname "${BASH_SOURCE[0]}" )
     input="$name$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl"
