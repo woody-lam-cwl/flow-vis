@@ -13,8 +13,9 @@ function run_deltagen() {
     wing_type=$11
 
     script_dir=$( dirname "${BASH_SOURCE[0]}" )
-    input="$name\n$mach\n$reynolds\n$aoa\n$sweep\n$grid_scale\n$half_span\n$height_ratio\n$time_factor\n$smooth_factor\n$steps\n$wing_type\n"
-    echo "Running deltagen with input: \n${input}"
+    input=$'$name\n$mach\n$reynolds\n$aoa\n$sweep\n$grid_scale\n$half_span\n$height_ratio\n$time_factor\n$smooth_factor\n$steps\n$wing_type\n'
+    echo $"Running deltagen with input:"
+    echo "${input}"
     $script_dir/../deltagen <<< $input > /dev/null
     echo "Deltagen complete"
     echo $input > $script_dir/../results/$name/run_configurations.dat
