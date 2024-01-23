@@ -14,6 +14,8 @@ function run_deltagen() {
     steps=10000
     wing_type=${arg_arr[10]}
 
+    echo "${arg_arr}"
+
     script_dir=$( dirname "${BASH_SOURCE[0]}" )
     input="$name$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl"
     echo "Running deltagen with input:"
