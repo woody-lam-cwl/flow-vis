@@ -47,7 +47,7 @@ function run_tblock() {
 function run_once() {
     echo "Running configuration: $line"
 
-    required_param=11
+    required_param=12
     if [[ $# -ne $required_param ]]; then
         echo "Insufficient number of parameters provided. Found $# needed $required_param."
         exit 1
