@@ -12,7 +12,7 @@ function run_deltagen() {
     height_ratio=${arg_arr[8]}
     time_factor=${arg_arr[9]}
     smooth_factor=${arg_arr[10]}
-    steps=10000
+    steps=1000000
     wing_type=${arg_arr[11]}
 
     script_dir=$( dirname "${BASH_SOURCE[0]}" )

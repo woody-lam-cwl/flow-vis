@@ -3068,9 +3068,6 @@ C******************************************************************************
 
       INCLUDE 'commall-29'
 
-      WRITE(6,*) "*** RUNNING WITH ERROR ***"
-      WRITE(6,*) ERROR
-
       DO I = 1,CONV_HISTORY
       CLIFT_ERROR = ABS((LAST_CLIFT(I) - CLIFT) / CLIFT)
       CDRAG_ERROR = ABS((LAST_CDRAG(I) - CDRAG) / CDRAG)
