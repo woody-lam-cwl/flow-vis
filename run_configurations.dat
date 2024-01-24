@@ -1,9 +1,29 @@
-new-diamond-m06-a0a2-scale1 0.01 0.6 5000000 2 78 1 0.333 2 0.4 1.0 2 0.5
-new-diamond-m06-a0a5-scale1 0.01 0.6 5000000 5 78 1 0.333 2 0.4 1.0 2 0.5
-new-diamond-m06-a0a10-scale1 0.01 0.6 5000000 10 78 1 0.333 2 0.4 1.0 2 0.5
-new-diamond-m06-a0a15-scale1 0.01 0.6 5000000 15 78 1 0.333 2 0.4 1.0 2 0.5
-new-diamond-m06-a0a20-scale1 0.01 0.6 5000000 20 78 1 0.333 2 0.4 1.0 2 0.5
-new-diamond-m06-a0a25-scale1 0.01 0.6 5000000 25 78 1 0.333 2 0.4 1.0 2 0.5
-new-diamond-m06-a0a30-scale1 0.01 0.6 5000000 30 78 1 0.333 2 0.4 1.0 2 0.5
+final-flat-m06-aoa2-scale5 0.01 0.6 5000000 2 78 5 0.333 2 0.4 1 1
+final-flat-m06-aoa5-scale5 0.01 0.6 5000000 5 78 5 0.333 2 0.4 1 1
+final-flat-m06-aoa10-scale5 0.01 0.6 5000000 10 78 5 0.333 2 0.4 1 1
+final-flat-m06-aoa15-scale5 0.01 0.6 5000000 15 78 5 0.333 2 0.4 1 1
+final-flat-m06-aoa20-scale5 0.01 0.6 5000000 20 78 5 0.333 2 0.4 1 1
+final-flat-m06-aoa25-scale5 0.01 0.6 5000000 25 78 5 0.333 2 0.4 1 1
+
+final-sub-m06-aoa2-scale5 0.01 0.6 5000000 2 78 5 0.333 2 0.4 1 3
+final-sub-m06-aoa5-scale5 0.01 0.6 5000000 5 78 5 0.333 2 0.4 1 3
+final-sub-m06-aoa10-scale5 0.01 0.6 5000000 10 78 5 0.333 2 0.4 1 3
+final-sub-m06-aoa15-scale5 0.01 0.6 5000000 15 78 5 0.333 2 0.4 1 3
+final-sub-m06-aoa20-scale5 0.01 0.6 5000000 20 78 5 0.333 2 0.4 1 3
+final-sub-m06-aoa25-scale5 0.01 0.6 5000000 25 78 5 0.333 2 0.4 1 3
+
+final-diamond-m06-aoa2-scale5 0.01 0.6 5000000 2 78 5 0.333 2 0.4 1 2 0.5
+final-diamond-m06-aoa5-scale5 0.01 0.6 5000000 5 78 5 0.333 2 0.4 1 2 0.5
+final-diamond-m06-aoa10-scale5 0.01 0.6 5000000 10 78 5 0.333 2 0.4 1 2 0.5
+final-diamond-m06-aoa15-scale5 0.01 0.6 5000000 15 78 5 0.333 2 0.4 1 2 0.5
+final-diamond-m06-aoa20-scale5 0.01 0.6 5000000 20 78 5 0.333 2 0.4 1 2 0.5
+final-diamond-m06-aoa25-scale5 0.01 0.6 5000000 25 78 5 0.333 2 0.4 1 2 0.5
+
+final-flat-m06-aoa30-scale5 0.01 0.6 5000000 30 78 5 0.333 3 0.2 1.5 1
+final-flat-m06-aoa35-scale5 0.01 0.6 5000000 35 78 5 0.333 3 0.2 1.5 1
+final-sub-m06-aoa30-scale5 0.01 0.6 5000000 30 78 5 0.333 3 0.2 1.5 3
+final-sub-m06-aoa35-scale5 0.01 0.6 5000000 35 78 5 0.333 3 0.2 1.5 3
+final-diamond-m06-aoa30-scale5 0.01 0.6 5000000 30 78 5 0.333 3 0.2 1.5 2 0.5
+final-diamond-m06-aoa35-scale5 0.01 0.6 5000000 35 78 5 0.333 3 0.2 1.5 2 0.5
 
 EOF
