@@ -2,20 +2,21 @@ function run_deltagen() {
     nl=$'\n'
     arg_arr=("$@")
     name=${arg_arr[0]}
-    mach=${arg_arr[1]}
-    reynolds=${arg_arr[2]}
-    aoa=${arg_arr[3]}
-    sweep=${arg_arr[4]}
-    grid_scale=${arg_arr[5]}
-    half_span=${arg_arr[6]}
-    height_ratio=${arg_arr[7]}
-    time_factor=${arg_arr[8]}
-    smooth_factor=${arg_arr[9]}
+    error=${arg_arr[1]}
+    mach=${arg_arr[2]}
+    reynolds=${arg_arr[3]}
+    aoa=${arg_arr[4]}
+    sweep=${arg_arr[5]}
+    grid_scale=${arg_arr[6]}
+    half_span=${arg_arr[7]}
+    height_ratio=${arg_arr[8]}
+    time_factor=${arg_arr[9]}
+    smooth_factor=${arg_arr[10]}
     steps=10000
-    wing_type=${arg_arr[10]}
+    wing_type=${arg_arr[11]}
 
     script_dir=$( dirname "${BASH_SOURCE[0]}" )
-    input="$name$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl"
+    input="$name$nl$error$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl"
     echo "Running deltagen with input:"
     echo "${input}"
     $script_dir/../deltagen <<< $input > /dev/null
