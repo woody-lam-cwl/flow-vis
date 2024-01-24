@@ -275,9 +275,11 @@ C
       CHARACTER*1  PTYPE,DUMMY
 C
       PI = 3.1415926
+      READ(5,999)   ERROR
       READ(5,1000)  TITLE
       WRITE(6,1000) TITLE
 C
+ 999  FORMAT(F7.4)
  1000 FORMAT(A70)
  1010 FORMAT(8F12.5)
  1040 FORMAT(A1)
@@ -296,7 +298,7 @@ C
   346 CONTINUE
       WRITE(6,*)  'CFL NUMBER', CFL
 C
-      NSTEPS    = 10000
+      NSTEPS    = 1000000
       NCHANGE   = 1000
       NSTEPUP   = 5
       IFRESTART = 0
@@ -3066,7 +3068,8 @@ C******************************************************************************
 
       INCLUDE 'commall-29'
 
-      ERROR = 0.01
+      WRITE(6,*) "*** RUNNING WITH ERROR ***"
+      WRITE(6,*) ERROR
 
       DO I = 1,CONV_HISTORY
       CLIFT_ERROR = ABS((LAST_CLIFT(I) - CLIFT) / CLIFT)
@@ -3654,10 +3657,10 @@ C
       WRITE(6,*) '  PRESSURE LIFT, PRESSURE DRAG',  PLIFT,PDRAG
       WRITE(6,*) '  VISCOUS LIFT , VISCOUS DRAG ',  VLIFT,VDRAG
       WRITE(6,*) ' INLET DYNAMIC HEAD = ', P_DYNAMIC_IN
-      WRITE(6,*) ' TOTAL LIFT COEFF.= ', CLIFT
-      WRITE(6,*) ' TOTAL DRAG COEFF.= ', CDRAG
-      WRITE(6,*) ' PREVIOUS LIFTS.= ', LAST_CLIFT
-      WRITE(6,*) ' PREVIOUS DRAGS.= ', LAST_CDRAG
+      WRITE(6,*) ' TOTAL LIFT COEFF. = ', CLIFT
+      WRITE(6,*) ' TOTAL DRAG COEFF. = ', CDRAG
+      WRITE(6,*) ' PREVIOUS LIFTS = ', LAST_CLIFT
+      WRITE(6,*) ' PREVIOUS DRAGS = ', LAST_CDRAG
 
       
       WRITE(7,*) NSTEP, ',', CLIFT, ',', CDRAG
