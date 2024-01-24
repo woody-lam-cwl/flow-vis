@@ -59,6 +59,8 @@ function run_once() {
 
 function run_many() {
     while IFS= read -r line; do
-        run_once $line &
+        if [[ ! -z $line ]]; then
+            run_once $line &            
+        fi
     done < $1
 }
