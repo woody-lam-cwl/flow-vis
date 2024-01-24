@@ -17,8 +17,7 @@ function run_deltagen() {
 
     script_dir=$( dirname "${BASH_SOURCE[0]}" )
     input="$name$nl$error$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl"
-    echo "Running deltagen with input:"
-    echo "${input}"
+    echo "Running deltagen for $name"
     $script_dir/../deltagen <<< $input > /dev/null
 
     if [[ $? -eq 0 ]]; then
@@ -45,5 +44,21 @@ function run_tblock() {
     echo "Run completed for path ${target_dir}"
 }
 
-run_deltagen "$@"
-run_tblock $1
+function run_once() {
+    echo "Running configuration: $line"
+
+    required_param=11
+    if [[ $# -ne $required_param ]]; then
+        echo "Insufficient number of parameters provided. Found $# needed $required_param."
+        exit 1
+    fi
+
+    run_deltagen "$@"
+    run_tblock $1
+}
+
+function run_many() {
+    while IFS= read -r line; do
+        run_once $line &
+    done < $1
+}
