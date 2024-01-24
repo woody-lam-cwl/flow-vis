@@ -3,21 +3,22 @@ function run_deltagen() {
     arg_arr=("$@")
     name=${arg_arr[0]}
     error=${arg_arr[1]}
-    mach=${arg_arr[2]}
-    reynolds=${arg_arr[3]}
-    aoa=${arg_arr[4]}
-    sweep=${arg_arr[5]}
-    grid_scale=${arg_arr[6]}
-    half_span=${arg_arr[7]}
-    height_ratio=${arg_arr[8]}
-    time_factor=${arg_arr[9]}
-    smooth_factor=${arg_arr[10]}
+    save_flow=${arg_arr[2]}
+    mach=${arg_arr[3]}
+    reynolds=${arg_arr[4]}
+    aoa=${arg_arr[5]}
+    sweep=${arg_arr[6]}
+    grid_scale=${arg_arr[7]}
+    half_span=${arg_arr[8]}
+    height_ratio=${arg_arr[9]}
+    time_factor=${arg_arr[10]}
+    smooth_factor=${arg_arr[11]}
     steps=1000000
-    wing_type=${arg_arr[11]}
-    diamond_max_thickness=${arg_arr[12]}
+    wing_type=${arg_arr[12]}
+    diamond_max_thickness=${arg_arr[13]}
 
     script_dir=$( dirname "${BASH_SOURCE[0]}" )
-    input="$name$nl$error$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl$diamond_max_thickness$nl"
+    input="$name$nl$error$nl$save_flow$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl$diamond_max_thickness$nl"
     echo "Running deltagen for $name"
     $script_dir/../deltagen <<< $input > /dev/null
 
@@ -46,9 +47,9 @@ function run_tblock() {
 }
 
 function run_once() {
-    echo "Running configuration: $line"
+    echo "Running configuration: $@"
 
-    required_param=12
+    required_param=13
     if [[ $# -lt $required_param ]]; then
         echo "Insufficient number of parameters provided. Found $# needed $required_param."
         exit 1
