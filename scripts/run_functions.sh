@@ -14,9 +14,10 @@ function run_deltagen() {
     smooth_factor=${arg_arr[10]}
     steps=1000000
     wing_type=${arg_arr[11]}
+    diamond_max_thickness=${arg_arr[12]}
 
     script_dir=$( dirname "${BASH_SOURCE[0]}" )
-    input="$name$nl$error$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl"
+    input="$name$nl$error$nl$mach$nl$reynolds$nl$aoa$nl$sweep$nl$grid_scale$nl$half_span$nl$height_ratio$nl$time_factor$nl$smooth_factor$nl$steps$nl$wing_type$nl$diamond_max_thickness$nl"
     echo "Running deltagen for $name"
     $script_dir/../deltagen <<< $input > /dev/null
 
@@ -48,7 +49,7 @@ function run_once() {
     echo "Running configuration: $line"
 
     required_param=12
-    if [[ $# -ne $required_param ]]; then
+    if [[ $# -lt $required_param ]]; then
         echo "Insufficient number of parameters provided. Found $# needed $required_param."
         exit 1
     fi
