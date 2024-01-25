@@ -4703,11 +4703,12 @@ C     EXTRA VARIABLES REQUIRED FOR THE TBLOCK-TO-VTK WRITER. JMB.
 C
       CHARACTER*100 COMPLETED_PATH, FLOWOUT_PATH, GRIDOUT_PATH
       
-      IF (SAVE_FLOW .EQ. 0) THEN
       COMPLETED_PATH = TRIM(OUTPUT_PATH)//'task_completed'
       OPEN(UNIT=10, FORM='unformatted', FILE=COMPLETED_PATH)
       WRITE(10) 1
       CLOSE(10)
+
+      IF (SAVE_FLOW .EQ. 0) THEN
       WRITE(6,*) "Task completed. Flow files will not be written."
       RETURN
       END IF
