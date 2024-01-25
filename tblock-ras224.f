@@ -66,7 +66,7 @@ C
 C*****************************************************************************
 C
       IF(NSTEPS.EQ.0) THEN
-	   CALL PLOTOUT(OUTPUT_PATH)
+	   CALL PLOTOUT
 	   STOP
       ENDIF
 C
@@ -198,7 +198,7 @@ C
 C
 C**********Call to the main solver routine SET_FLUX. WHICH CALLS SUM_FLUX AND NUSMOOTH.
 C
-      CALL SET_FLUX(OUTPUT_PATH)
+      CALL SET_FLUX
 C
 C**********Call BCONDS to apply all boundary conditions.
 C
@@ -207,7 +207,7 @@ C
 C      CHECK IF A REQUEST TO STOP HAS BEEN RECEIVED EVERY 10 STEPS.
 C
       IF(MOD(NSTEP,10).EQ.0) THEN
-      IF(IFSTOP.GE.1) CALL PLOTOUT(OUTPUT_PATH)
+      IF(IFSTOP.GE.1) CALL PLOTOUT
       IF(IFSTOP.EQ.2) STOP
       IFSTOP = 0
       OPEN(UNIT=11,FILE=TRIM(OUTPUT_PATH) // 'stopit')      
@@ -251,7 +251,7 @@ C*******************************************************************************
 C
 C     WRITE OUT THE PLOTTING/RESTART FILE  'flowout'.
 C
-      CALL PLOTOUT(OUTPUT_PATH)
+      CALL PLOTOUT
 C
 C
       STOP
@@ -3066,7 +3066,7 @@ C*****************************************************************************
 
       END
 C******************************************************************************
-      SUBROUTINE HAS_CONV(OUTPUT_PATH, CLIFT, CDRAG)
+      SUBROUTINE HAS_CONV(CLIFT, CDRAG)
 
       INCLUDE 'commall-29'
 
@@ -3087,7 +3087,7 @@ C******************************************************************************
       END
 C******************************************************************************
 C
-      SUBROUTINE SET_FLUX(OUTPUT_PATH)
+      SUBROUTINE SET_FLUX
 C
       INCLUDE 'commall-29'
 C
@@ -3637,7 +3637,7 @@ C
       CLIFT = (PLIFT+VLIFT)/AWING/P_DYNAMIC_IN
       CDRAG = (PDRAG+VDRAG)/AWING/P_DYNAMIC_IN
 
-      CALL HAS_CONV(OUTPUT_PATH,CLIFT,CDRAG)
+      CALL HAS_CONV(CLIFT,CDRAG)
       CALL UPDATE_CONV(CLIFT,CDRAG)
 C
 C
@@ -4676,7 +4676,7 @@ C
 C
 C**********************************************************************
 C
-      SUBROUTINE PLOTOUT(OUTPUT_PATH)
+      SUBROUTINE PLOTOUT
 C
 C**********************************************************************
 C
